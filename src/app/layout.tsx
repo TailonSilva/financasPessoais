@@ -1,4 +1,6 @@
+import MenuLateral from "@/components/menuLateral";
 import type { Metadata } from "next";
+import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Financas Pessoais",
@@ -13,6 +15,7 @@ export default function RootLayout({
   return (
     <html lang="pt-BR">
       <body>
+        <MenuLateral />
         {children}
       </body>
     </html>
