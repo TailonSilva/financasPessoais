@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { getDatabase } from "../../lib/db/server.mjs";
+import { getDatabase } from "../db/connection.mjs";
 
 const router = Router();
 
@@ -24,4 +24,3 @@ router.get("/", async (request, response) => {
 });
 
 export default router;
-

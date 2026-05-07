@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "next dev",
     "dev:web": "next dev",
-    "dev:server": "node src/server/index.mjs",
+    "dev:server": "node src/server/db/server.mjs",
     "devLocal": "powershell -ExecutionPolicy Bypass -File scripts/dev-electron.ps1",
     "dev:local": "npm run devLocal",
     "electron": "electron .",
@@ -15,7 +15,7 @@
     "build:all": "npm run build",
     "bild": "npm run build",
     "start": "next start",
-    "start:server": "node src/server/index.mjs",
+    "start:server": "node src/server/db/server.mjs",
     "lint": "eslint",
     "lint:fix": "eslint --fix",
     "fix": "npm run lint:fix"

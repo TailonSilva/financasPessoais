@@ -1,7 +1,7 @@
 import cors from "cors";
 import express from "express";
-import { closeDatabase } from "../lib/db/server.mjs";
-import dbRoutes from "./routes/db.mjs";
+import { closeDatabase } from "./connection.mjs";
+import dbRoutes from "../routes/db.mjs";
 
 const app = express();
 const port = Number(process.env.API_PORT || 3001);

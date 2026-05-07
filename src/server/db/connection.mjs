@@ -2,7 +2,7 @@ import path from "node:path";
 import sqlite3 from "sqlite3";
 import { open } from "sqlite";
 
-const databasePath = path.join(process.cwd(), "src", "lib", "db", "db.sqlite");
+const databasePath = path.join(process.cwd(), "src", "server", "db", "db.sqlite");
 
 let databasePromise;
 
