@@ -320,6 +320,18 @@
   box-shadow: 0 0 0 3px rgba(30, 150, 242, 0.12);
 }
 
+.launch-modal__check {
+  align-items: center;
+  flex-direction: row !important;
+  gap: 8px;
+  min-height: 38px;
+}
+
+.launch-modal__check input {
+  height: 16px;
+  width: 16px;
+}
+
 .launch-modal__footer {
   display: flex;
   gap: 10px;
@@ -381,7 +393,7 @@
 .cash-flow-summary {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(4, minmax(180px, 1fr));
+  grid-template-columns: repeat(5, minmax(160px, 1fr));
 }
 
 .cash-flow-card {
@@ -409,6 +421,10 @@
 
 .cash-flow-card--green {
   background: var(--color-brand-green);
+}
+
+.cash-flow-card--yellow {
+  background: var(--color-brand-yellow);
 }
 
 .cash-flow-card--red {

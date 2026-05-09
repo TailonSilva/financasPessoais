@@ -1,5 +1,7 @@
+import { apiUrl } from './api'
+
 export async function fetchFaturasCartao() {
-  const response = await fetch("/api/faturas-cartao");
+  const response = await fetch(apiUrl("/api/faturas-cartao"));
 
   if (!response.ok) {
     throw new Error("Não foi possível carregar as faturas dos cartões");
@@ -11,7 +13,7 @@ export async function fetchFaturasCartao() {
 }
 
 export async function fetchParcelasCartao() {
-  const response = await fetch("/api/parcelas-cartao");
+  const response = await fetch(apiUrl("/api/parcelas-cartao"));
 
   if (!response.ok) {
     throw new Error("Não foi possível carregar as compras das faturas");
@@ -23,7 +25,7 @@ export async function fetchParcelasCartao() {
 }
 
 export async function fetchAjustesFaturaCartao() {
-  const response = await fetch("/api/ajustes-fatura-cartao");
+  const response = await fetch(apiUrl("/api/ajustes-fatura-cartao"));
 
   if (!response.ok) {
     throw new Error("Não foi possível carregar os estornos das faturas");
@@ -35,7 +37,7 @@ export async function fetchAjustesFaturaCartao() {
 }
 
 export async function fetchCartoesCredito() {
-  const response = await fetch("/api/cartoes-credito");
+  const response = await fetch(apiUrl("/api/cartoes-credito"));
 
   if (!response.ok) {
     throw new Error("Não foi possível carregar os cartões de crédito");
@@ -47,7 +49,7 @@ export async function fetchCartoesCredito() {
 }
 
 export async function criarCompraCartao(compra) {
-  const response = await fetch("/api/compras-cartao", {
+  const response = await fetch(apiUrl("/api/compras-cartao"), {
     body: JSON.stringify(compra),
     headers: {
       "Content-Type": "application/json",
@@ -64,7 +66,7 @@ export async function criarCompraCartao(compra) {
 }
 
 export async function criarAjusteFaturaCartao(ajuste) {
-  const response = await fetch("/api/ajustes-fatura-cartao", {
+  const response = await fetch(apiUrl("/api/ajustes-fatura-cartao"), {
     body: JSON.stringify(ajuste),
     headers: {
       "Content-Type": "application/json",

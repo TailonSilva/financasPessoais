@@ -25,3 +25,33 @@ tiposContaRoutes.get('/tipos-conta', (_req, res) => {
     },
   )
 })
+
+tiposContaRoutes.post('/tipos-conta', (req, res) => {
+  const { descricao } = req.body
+
+  if (!descricao?.trim()) {
+    return res.status(400).json({ error: 'Informe a descrição do tipo de conta.' })
+  }
+
+  db.run(
+    'INSERT INTO tipo_conta (descricao) VALUES (?)',
+    [descricao.trim()],
+    function inserirTipoConta(error) {
+      if (error) {
+        return res.status(500).json({ error: error.message })
+      }
+
+      return db.get(
+        'SELECT id, descricao FROM tipo_conta WHERE id = ?',
+        [this.lastID],
+        (selectError, row) => {
+          if (selectError) {
+            return res.status(500).json({ error: selectError.message })
+          }
+
+          return res.status(201).json(row)
+        },
+      )
+    },
+  )
+})

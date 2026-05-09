@@ -25,3 +25,33 @@ categoriasRoutes.get('/categorias', (_req, res) => {
     },
   )
 })
+
+categoriasRoutes.post('/categorias', (req, res) => {
+  const { descricao, icone = null, cor = null } = req.body
+
+  if (!descricao?.trim()) {
+    return res.status(400).json({ error: 'Informe a descrição da categoria.' })
+  }
+
+  db.run(
+    'INSERT INTO categoria (descricao, icone, cor) VALUES (?, ?, ?)',
+    [descricao.trim(), icone || null, cor || null],
+    function inserirCategoria(error) {
+      if (error) {
+        return res.status(500).json({ error: error.message })
+      }
+
+      return db.get(
+        'SELECT id, descricao, icone, cor FROM categoria WHERE id = ?',
+        [this.lastID],
+        (selectError, row) => {
+          if (selectError) {
+            return res.status(500).json({ error: selectError.message })
+          }
+
+          return res.status(201).json(row)
+        },
+      )
+    },
+  )
+})

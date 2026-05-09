@@ -1,5 +1,7 @@
+import { apiUrl } from './api'
+
 export async function fetchLancamentos() {
-  const response = await fetch("/api/db-lancamentos");
+  const response = await fetch(apiUrl("/api/db-lancamentos"));
 
   if (!response.ok) {
     throw new Error("Não foi possível carregar os lançamentos");
@@ -11,7 +13,7 @@ export async function fetchLancamentos() {
 }
 
 export async function criarLancamento(lancamento) {
-  const response = await fetch("/api/db-lancamentos", {
+  const response = await fetch(apiUrl("/api/db-lancamentos"), {
     body: JSON.stringify(lancamento),
     headers: {
       "Content-Type": "application/json",
@@ -28,7 +30,7 @@ export async function criarLancamento(lancamento) {
 }
 
 export async function atualizarLancamento(id, lancamento) {
-  const response = await fetch(`/api/db-lancamentos/${id}`, {
+  const response = await fetch(apiUrl(`/api/db-lancamentos/${id}`), {
     body: JSON.stringify(lancamento),
     headers: {
       "Content-Type": "application/json",
@@ -45,7 +47,7 @@ export async function atualizarLancamento(id, lancamento) {
 }
 
 export async function atualizarPagamentoLancamento(id, dataPagamento) {
-  const response = await fetch(`/api/db-lancamentos/${id}/pagamento`, {
+  const response = await fetch(apiUrl(`/api/db-lancamentos/${id}/pagamento`), {
     body: JSON.stringify({ data_pagamento: dataPagamento }),
     headers: {
       "Content-Type": "application/json",
@@ -62,7 +64,7 @@ export async function atualizarPagamentoLancamento(id, dataPagamento) {
 }
 
 export async function excluirLancamento(id) {
-  const response = await fetch(`/api/db-lancamentos/${id}`, {
+  const response = await fetch(apiUrl(`/api/db-lancamentos/${id}`), {
     method: "DELETE",
   });
 

@@ -33,7 +33,7 @@ export function PageHeader({ actions }) {
   )
 }
 
-export function MesSelector({ value, onChange }) {
+export function MesSelector({ value, onChange, year, onYearChange }) {
   const [mesInterno, setMesInterno] = useState(mesAtual)
   const mesSelecionado = value ?? mesInterno
 
@@ -47,11 +47,31 @@ export function MesSelector({ value, onChange }) {
   }
 
   function selecionarMesAnterior() {
-    atualizarMes(mesSelecionado === 1 ? meses.length : mesSelecionado - 1)
+    if (mesSelecionado === 1) {
+      atualizarMes(meses.length)
+
+      if (onYearChange && year) {
+        onYearChange(year - 1)
+      }
+
+      return
+    }
+
+    atualizarMes(mesSelecionado - 1)
   }
 
   function selecionarProximoMes() {
-    atualizarMes(mesSelecionado === meses.length ? 1 : mesSelecionado + 1)
+    if (mesSelecionado === meses.length) {
+      atualizarMes(1)
+
+      if (onYearChange && year) {
+        onYearChange(year + 1)
+      }
+
+      return
+    }
+
+    atualizarMes(mesSelecionado + 1)
   }
 
   return (

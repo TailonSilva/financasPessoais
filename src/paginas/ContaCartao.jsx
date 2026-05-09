@@ -16,7 +16,7 @@ import {
 import { fetchCategorias } from "../utilitarios/fetch/cadastros";
 import { formatarMoeda } from "../utilitarios/formatarMoeda";
 
-const tiposInclusaoCartao = ["Despesa no cartão", "Estorno"];
+const tiposInclusaoCartao = ["Despesa no cartão", "Estorno", "Pagamento"];
 const nomesMeses = [
   "Janeiro",
   "Fevereiro",
@@ -81,6 +81,7 @@ function ContaCartao() {
   const [menuContexto, setMenuContexto] = useState(null);
   const [menuNovoAberto, setMenuNovoAberto] = useState(false);
   const [modalInclusao, setModalInclusao] = useState(null);
+  const [cartaoEstornoSelecionado, setCartaoEstornoSelecionado] = useState("");
   const [mesSelecionado, setMesSelecionado] = useState(
     () => new Date().getMonth() + 1,
   );
@@ -138,6 +139,13 @@ function ContaCartao() {
     (fatura) =>
       Number(fatura.mes_referencia) === mesSelecionado &&
       Number(fatura.ano_referencia) === anoSelecionado,
+  );
+  const opcoesPrimeiraFatura = gerarOpcoesPrimeiraFatura();
+  const referenciasFuturas = new Set(opcoesPrimeiraFatura.map((opcao) => opcao.value));
+  const faturasDoCartaoEstorno = faturas.filter(
+    (fatura) =>
+      Number(fatura.cartao_id) === Number(cartaoEstornoSelecionado) &&
+      referenciasFuturas.has(`${fatura.mes_referencia}-${fatura.ano_referencia}`),
   );
   const cartoesComFaturas = Object.values(agruparFaturasPorCartao(faturasDoMes));
 
@@ -204,11 +212,11 @@ function ContaCartao() {
         });
       }
 
-      if (modalInclusao === "Estorno") {
+      if (modalInclusao === "Estorno" || modalInclusao === "Pagamento") {
         await criarAjusteFaturaCartao({
           fatura_cartao_id: dados.fatura_cartao_id,
           descricao: dados.descricao,
-          tipo: "estorno",
+          tipo: modalInclusao === "Pagamento" ? "pagamento" : "estorno",
           valor: dados.valor,
           data_ajuste: dados.data_ajuste || null,
         });
@@ -226,7 +234,12 @@ function ContaCartao() {
       <PageHeader
         actions={
           <>
-            <MesSelector value={mesSelecionado} onChange={setMesSelecionado} />
+            <MesSelector
+              value={mesSelecionado}
+              onChange={setMesSelecionado}
+              year={anoSelecionado}
+              onYearChange={setAnoSelecionado}
+            />
             <AnoSelector value={anoSelecionado} onChange={setAnoSelecionado} />
             <div className="new-entry">
               <HeaderActionButton
@@ -250,6 +263,7 @@ function ContaCartao() {
                       type="button"
                       onClick={() => {
                         setModalInclusao(tipo);
+                        setCartaoEstornoSelecionado("");
                         setMenuNovoAberto(false);
                       }}
                     >
@@ -354,7 +368,7 @@ function ContaCartao() {
                             onContextMenu={(event) => abrirMenuContexto(event, ajuste, fatura)}
                           >
                             <td>{ajuste.descricao}</td>
-                            <td>-</td>
+                            <td>{ajuste.tipo === "pagamento" ? "Pagamento" : "Estorno"}</td>
                             <td>
                               {fatura.banco_imagem && (
                                 <img src={"src/assets/img/" + fatura.banco_imagem} alt="" />
@@ -480,7 +494,7 @@ function ContaCartao() {
                   <label>
                     Primeira fatura
                     <select name="primeira_fatura" required>
-                      {gerarOpcoesPrimeiraFatura().map((opcao) => (
+                      {opcoesPrimeiraFatura.map((opcao) => (
                         <option key={opcao.value} value={opcao.value}>
                           {opcao.label}
                         </option>
@@ -491,28 +505,59 @@ function ContaCartao() {
               ) : (
                 <>
                   <label>
-                    Fatura
-                    <select name="fatura_cartao_id" required>
+                    Cartão
+                    <select
+                      name="cartao_id"
+                      value={cartaoEstornoSelecionado}
+                      onChange={(event) => setCartaoEstornoSelecionado(event.target.value)}
+                      required
+                    >
                       <option value="">Selecione</option>
-                      {faturasDoMes.map((fatura) => (
+                      {cartoes.map((cartao) => (
+                        <option key={cartao.id} value={cartao.id}>
+                          {cartao.descricao}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Fatura
+                    <select
+                      name="fatura_cartao_id"
+                      disabled={!cartaoEstornoSelecionado}
+                      required
+                    >
+                      <option value="">Selecione</option>
+                      {faturasDoCartaoEstorno.map((fatura) => (
                         <option key={fatura.id} value={fatura.id}>
-                          {fatura.cartao} - {fatura.mes_referencia_descricao}/
-                          {fatura.ano_referencia}
+                          {fatura.mes_referencia_descricao}/{fatura.ano_referencia}
                         </option>
                       ))}
                     </select>
                   </label>
                   <label>
                     Descrição
-                    <input name="descricao" type="text" required />
+                    <input
+                      name="descricao"
+                      type="text"
+                      defaultValue={
+                        modalInclusao === "Pagamento" ? "Pagamento parcial da fatura" : ""
+                      }
+                      required
+                    />
                   </label>
                   <label>
-                    Valor do estorno
+                    {modalInclusao === "Pagamento" ? "Valor pago" : "Valor do estorno"}
                     <input name="valor" type="number" min="0.01" step="0.01" required />
                   </label>
                   <label>
-                    Data do estorno
-                    <input name="data_ajuste" type="date" defaultValue={getDataAtualInput()} />
+                    {modalInclusao === "Pagamento" ? "Data do pagamento" : "Data do estorno"}
+                    <input
+                      name="data_ajuste"
+                      type="date"
+                      defaultValue={getDataAtualInput()}
+                      max={getDataAtualInput()}
+                    />
                   </label>
                 </>
               )}

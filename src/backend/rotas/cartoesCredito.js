@@ -80,6 +80,64 @@ async function getTipoDespesaId() {
   return tipo.id
 }
 
+async function garantirColunaLancamentoAjuste() {
+  const tabela = await get(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'ajustes_fatura_cartao'",
+  )
+
+  if (tabela?.sql && !tabela.sql.includes("'pagamento'")) {
+    await run('PRAGMA foreign_keys = OFF')
+    await run('BEGIN TRANSACTION')
+
+    try {
+      await run(`CREATE TABLE ajustes_fatura_cartao_nova (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        fatura_cartao_id INTEGER NOT NULL,
+        descricao TEXT NOT NULL,
+        tipo TEXT NOT NULL DEFAULT 'estorno' CHECK (tipo IN ('estorno', 'ajuste', 'pagamento')),
+        valor REAL NOT NULL,
+        data_ajuste TEXT,
+        lancamento_id INTEGER,
+        FOREIGN KEY (fatura_cartao_id) REFERENCES faturas_cartao(id)
+      )`)
+      await run(`INSERT INTO ajustes_fatura_cartao_nova (
+        id,
+        fatura_cartao_id,
+        descricao,
+        tipo,
+        valor,
+        data_ajuste,
+        lancamento_id
+      ) SELECT
+        id,
+        fatura_cartao_id,
+        descricao,
+        tipo,
+        valor,
+        data_ajuste,
+        lancamento_id
+      FROM ajustes_fatura_cartao`)
+      await run('DROP TABLE ajustes_fatura_cartao')
+      await run('ALTER TABLE ajustes_fatura_cartao_nova RENAME TO ajustes_fatura_cartao')
+      await run('COMMIT')
+    } catch (error) {
+      await run('ROLLBACK').catch(() => {})
+      throw error
+    } finally {
+      await run('PRAGMA foreign_keys = ON')
+    }
+
+    return
+  }
+
+  const colunas = await all('PRAGMA table_info(ajustes_fatura_cartao)')
+  const temColuna = colunas.some((coluna) => coluna.name === 'lancamento_id')
+
+  if (!temColuna) {
+    await run('ALTER TABLE ajustes_fatura_cartao ADD COLUMN lancamento_id INTEGER')
+  }
+}
+
 async function getCategoriaCartaoId() {
   let categoria = await get(
     "SELECT id FROM categoria WHERE icone = 'credit-card' OR descricao LIKE 'Cart%' LIMIT 1",
@@ -242,7 +300,7 @@ async function atualizarValorFatura(faturaId) {
       COALESCE((
         SELECT SUM(valor)
         FROM ajustes_fatura_cartao
-        WHERE fatura_cartao_id = ? AND tipo = 'estorno'
+        WHERE fatura_cartao_id = ? AND tipo IN ('estorno', 'pagamento')
       ), 0) AS valor_total`,
     [faturaId, faturaId],
   )
@@ -296,9 +354,54 @@ async function listarAjustesFaturaCartao() {
 
 async function getFaturaPorId(id) {
   return get(
-    'SELECT id, status FROM faturas_cartao WHERE id = ?',
+    `SELECT
+      faturas_cartao.*,
+      cartoes_credito.descricao AS cartao,
+      cartoes_credito.conta_id
+    FROM faturas_cartao
+    LEFT JOIN cartoes_credito ON cartoes_credito.id = faturas_cartao.cartao_id
+    WHERE faturas_cartao.id = ?`,
     [id],
   )
+}
+
+async function criarLancamentoPagamentoFatura({ fatura, descricao, valor, dataPagamento }) {
+  const categoriaId = await getCategoriaCartaoId()
+  const tipoDespesaId = await getTipoDespesaId()
+  const dataBase = dataPagamento || new Date().toISOString().slice(0, 10)
+  const [anoPagamento, mesPagamento, diaPagamento] = dataBase.split('-')
+
+  const result = await run(
+    `INSERT INTO ${LANCAMENTOS_TABLE} (
+      descricao,
+      data_vencimento,
+      data_pagamento,
+      categoria_id,
+      conta_id,
+      valor,
+      tipo_lancamento_id,
+      dia_vencimento,
+      mes_vencimento,
+      ano_vencimento,
+      conta_origem_id,
+      conta_destino_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+    [
+      descricao,
+      dataBase,
+      dataBase,
+      categoriaId,
+      fatura.conta_id,
+      valor,
+      tipoDespesaId,
+      diaPagamento,
+      mesPagamento,
+      anoPagamento,
+      fatura.conta_id,
+    ],
+  )
+
+  return result.lastID
 }
 
 function isDiaValido(dia) {
@@ -526,9 +629,9 @@ cartoesCreditoRoutes.post('/ajustes-fatura-cartao', async (req, res) => {
       })
     }
 
-    if (!['estorno', 'ajuste'].includes(tipo)) {
+    if (!['estorno', 'ajuste', 'pagamento'].includes(tipo)) {
       return res.status(400).json({
-        error: 'O tipo deve ser estorno ou ajuste.',
+        error: 'O tipo deve ser estorno, ajuste ou pagamento.',
       })
     }
 
@@ -544,15 +647,29 @@ cartoesCreditoRoutes.post('/ajustes-fatura-cartao', async (req, res) => {
       return res.status(404).json({ error: 'Fatura não encontrada.' })
     }
 
+    await garantirColunaLancamentoAjuste()
+
+    let lancamentoId = null
+
+    if (tipo === 'pagamento') {
+      lancamentoId = await criarLancamentoPagamentoFatura({
+        fatura,
+        descricao: descricao.trim(),
+        valor,
+        dataPagamento: data_ajuste,
+      })
+    }
+
     const result = await run(
       `INSERT INTO ajustes_fatura_cartao (
         fatura_cartao_id,
         descricao,
         tipo,
         valor,
-        data_ajuste
-      ) VALUES (?, ?, ?, ?, ?)`,
-      [fatura_cartao_id, descricao.trim(), tipo, valor, data_ajuste],
+        data_ajuste,
+        lancamento_id
+      ) VALUES (?, ?, ?, ?, ?, ?)`,
+      [fatura_cartao_id, descricao.trim(), tipo, valor, data_ajuste, lancamentoId],
     )
 
     await atualizarValorFatura(fatura_cartao_id)

@@ -10,7 +10,7 @@ const filename = fileURLToPath(import.meta.url)
 // Guarda o caminho completo da pasta atual.
 const dirname = path.dirname(filename)
 // Monta o caminho completo até o arquivo db.sqlite.
-const databasePath = path.join(dirname, 'db.sqlite')
+const databasePath = process.env.DB_PATH || path.join(dirname, 'db.sqlite')
 
 // Cria e exporta a conexão compartilhada com o banco SQLite.
 export const db = new sqlite3.Database(databasePath)

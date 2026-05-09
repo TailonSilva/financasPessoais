@@ -66,17 +66,27 @@
 .account-indicators {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(2, minmax(320px, 1fr));
+  grid-template-columns: repeat(4, minmax(240px, 1fr));
 }
 
 .account-indicator {
+  align-items: stretch;
   background: var(--color-page-bg);
   border: 1px solid var(--color-border);
   border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 1fr;
+  padding: 16px;
+}
+
+.account-indicator__identity {
+  border-bottom: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding: 16px;
+  gap: 4px;
+  justify-content: flex-start;
+  padding-bottom: 12px;
 }
 
 .account-indicator h3 {
@@ -90,31 +100,45 @@
   font-size: 12px;
 }
 
-.account-indicator__values {
-  display: grid;
-  gap: 10px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
-.account-indicator__values span {
+.account-indicator__table {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
+  border-collapse: separate;
   border-radius: 8px;
-  color: var(--color-muted);
-  display: flex;
-  flex-direction: column;
-  font-size: 12px;
-  gap: 5px;
-  padding: 10px;
+  border-spacing: 0;
+  overflow: hidden;
+  width: 100%;
 }
 
-.account-indicator__values small {
+.account-indicator__table th,
+.account-indicator__table td {
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text);
+  font-size: 12px;
+  padding: 8px 9px;
+  text-align: right;
+}
+
+.account-indicator__table th {
+  background: #f7fafc;
   color: var(--color-muted);
   font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.account-indicator__table th:first-child,
+.account-indicator__table td:first-child {
+  color: var(--color-muted);
+  font-weight: 700;
+  text-align: left;
+}
+
+.account-indicator__table td:nth-child(2),
+.account-indicator__table td:nth-child(3) {
   font-weight: 700;
 }
 
-.account-indicator__values strong {
-  color: var(--color-text);
-  font-size: 13px;
+.account-indicator__table tr:last-child td {
+  border-bottom: 0;
 }

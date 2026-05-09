@@ -1,5 +1,7 @@
+import { apiUrl } from './api'
+
 export async function fetchBancos() {
-  const response = await fetch('/api/bancos')
+  const response = await fetch(apiUrl('/api/bancos'))
 
   if (!response.ok) {
     throw new Error('Não foi possível carregar os bancos')
@@ -11,7 +13,7 @@ export async function fetchBancos() {
 }
 
 export async function fetchContas() {
-  const response = await fetch('/api/contas')
+  const response = await fetch(apiUrl('/api/contas'))
 
   if (!response.ok) {
     throw new Error('Não foi possível carregar as contas')
@@ -23,7 +25,7 @@ export async function fetchContas() {
 }
 
 export async function fetchCategorias() {
-  const response = await fetch('/api/categorias')
+  const response = await fetch(apiUrl('/api/categorias'))
 
   if (!response.ok) {
     throw new Error('Não foi possível carregar as categorias')

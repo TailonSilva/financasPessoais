@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { PageHeader } from '../componentes/PageHeader'
+import { apiUrl } from '../utilitarios/fetch/api'
 
 const cadastros = [
   {
+    id: 'categorias',
     titulo: 'Categorias',
     descricao: 'Organize receitas, despesas, compras no cartão e transferências.',
     acao: 'Nova categoria',
@@ -12,6 +14,11 @@ const cadastros = [
       { campo: 'descricao', titulo: 'Descrição' },
       { campo: 'icone', titulo: 'Ícone' },
       { campo: 'cor', titulo: 'Cor' },
+    ],
+    campos: [
+      { nome: 'descricao', label: 'Descrição', required: true },
+      { nome: 'icone', label: 'Ícone' },
+      { nome: 'cor', label: 'Cor', tipo: 'color', valorInicial: '#2d9cec' },
     ],
     variante: 'blue',
     icone: (
@@ -23,15 +30,25 @@ const cadastros = [
     ),
   },
   {
+    id: 'contas',
     titulo: 'Contas',
     descricao: 'Cadastre bancos, carteiras e contas usadas nos lançamentos.',
     acao: 'Nova conta',
     endpoint: '/api/contas',
+    dependencias: ['tiposConta', 'bancos'],
     colunas: [
       { campo: 'id', titulo: 'ID' },
       { campo: 'descricao', titulo: 'Descrição' },
       { campo: 'tipo_conta', titulo: 'Tipo' },
       { campo: 'banco', titulo: 'Banco' },
+      { campo: 'saldoInicial', titulo: 'Saldo inicial', tipo: 'moeda' },
+    ],
+    campos: [
+      { nome: 'descricao', label: 'Descrição', required: true },
+      { nome: 'saldoInicial', label: 'Saldo inicial', tipo: 'number', valorInicial: '0', step: '0.01' },
+      { nome: 'tipo_conta_id', label: 'Tipo de conta', tipo: 'select', opcoes: 'tiposConta' },
+      { nome: 'banco_id', label: 'Banco', tipo: 'select', opcoes: 'bancos' },
+      { nome: 'icone', label: 'Ícone' },
     ],
     variante: 'green',
     icone: (
@@ -47,10 +64,12 @@ const cadastros = [
     ),
   },
   {
+    id: 'cartoes',
     titulo: 'Cartões de crédito',
     descricao: 'Configure cartões, limite, fechamento e vencimento da fatura.',
     acao: 'Novo cartão',
     endpoint: '/api/cartoes-credito',
+    dependencias: ['contas'],
     colunas: [
       { campo: 'id', titulo: 'ID' },
       { campo: 'descricao', titulo: 'Descrição' },
@@ -58,6 +77,14 @@ const cadastros = [
       { campo: 'limite', titulo: 'Limite', tipo: 'moeda' },
       { campo: 'dia_fechamento', titulo: 'Fechamento' },
       { campo: 'dia_vencimento', titulo: 'Vencimento' },
+    ],
+    campos: [
+      { nome: 'descricao', label: 'Descrição', required: true },
+      { nome: 'conta_id', label: 'Conta de pagamento', tipo: 'select', opcoes: 'contas', required: true },
+      { nome: 'limite', label: 'Limite', tipo: 'number', step: '0.01', required: true },
+      { nome: 'dia_fechamento', label: 'Dia de fechamento', tipo: 'number', min: 1, max: 31, required: true },
+      { nome: 'dia_vencimento', label: 'Dia de vencimento', tipo: 'number', min: 1, max: 31, required: true },
+      { nome: 'ativo', label: 'Ativo', tipo: 'checkbox', valorInicial: true },
     ],
     variante: 'indigo',
     icone: (
@@ -69,6 +96,7 @@ const cadastros = [
     ),
   },
   {
+    id: 'bancos',
     titulo: 'Bancos',
     descricao: 'Mantenha os bancos disponíveis para vincular às contas.',
     acao: 'Novo banco',
@@ -77,6 +105,10 @@ const cadastros = [
       { campo: 'id', titulo: 'ID' },
       { campo: 'nome', titulo: 'Nome' },
       { campo: 'imagem', titulo: 'Imagem' },
+    ],
+    campos: [
+      { nome: 'nome', label: 'Nome', required: true },
+      { nome: 'imagem', label: 'Imagem' },
     ],
     variante: 'yellow',
     icone: (
@@ -92,6 +124,7 @@ const cadastros = [
     ),
   },
   {
+    id: 'tipos-conta',
     titulo: 'Tipos de conta',
     descricao: 'Defina os tipos usados para classificar cada conta cadastrada.',
     acao: 'Novo tipo',
@@ -100,6 +133,7 @@ const cadastros = [
       { campo: 'id', titulo: 'ID' },
       { campo: 'descricao', titulo: 'Descrição' },
     ],
+    campos: [{ nome: 'descricao', label: 'Descrição', required: true }],
     variante: 'red',
     icone: (
       <>
@@ -111,6 +145,12 @@ const cadastros = [
     ),
   },
 ]
+
+const endpointsDependencias = {
+  bancos: '/api/bancos',
+  contas: '/api/contas',
+  tiposConta: '/api/tipos-conta',
+}
 
 function formatarValor(valor, tipo) {
   if (valor === null || valor === undefined || valor === '') {
@@ -127,11 +167,29 @@ function formatarValor(valor, tipo) {
   return valor
 }
 
+function getValorInicial(cadastro) {
+  return cadastro.campos.reduce((valores, campo) => {
+    valores[campo.nome] = campo.valorInicial ?? ''
+    return valores
+  }, {})
+}
+
+function getOpcaoLabel(opcao) {
+  return opcao.descricao || opcao.nome || opcao.titulo || `Registro ${opcao.id}`
+}
+
 function Configuracao() {
   const [cadastroAberto, setCadastroAberto] = useState(null)
+  const [formularioAberto, setFormularioAberto] = useState(false)
   const [registros, setRegistros] = useState([])
+  const [opcoes, setOpcoes] = useState({})
+  const [formulario, setFormulario] = useState({})
   const [carregando, setCarregando] = useState(false)
+  const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
+  const [erroFormulario, setErroFormulario] = useState('')
+
+  const tituloFormulario = useMemo(() => cadastroAberto?.acao || 'Novo registro', [cadastroAberto])
 
   useEffect(() => {
     if (!cadastroAberto) {
@@ -140,6 +198,11 @@ function Configuracao() {
 
     function fecharComEsc(event) {
       if (event.key === 'Escape') {
+        if (formularioAberto) {
+          setFormularioAberto(false)
+          return
+        }
+
         setCadastroAberto(null)
       }
     }
@@ -149,23 +212,21 @@ function Configuracao() {
     return () => {
       window.removeEventListener('keydown', fecharComEsc)
     }
-  }, [cadastroAberto])
+  }, [cadastroAberto, formularioAberto])
 
-  async function abrirCadastro(cadastro) {
-    setCadastroAberto(cadastro)
-    setRegistros([])
+  async function carregarRegistros(cadastro) {
     setErro('')
     setCarregando(true)
 
     try {
-      const resposta = await fetch(cadastro.endpoint)
+      const resposta = await fetch(apiUrl(cadastro.endpoint))
 
       if (!resposta.ok) {
         throw new Error('Não foi possível carregar os dados.')
       }
 
       const dados = await resposta.json()
-      setRegistros(dados)
+      setRegistros(Array.isArray(dados) ? dados : [])
     } catch (error) {
       setErro(error.message)
     } finally {
@@ -173,8 +234,155 @@ function Configuracao() {
     }
   }
 
-  function incluirRegistro() {
-    console.log(`Incluir registro em: ${cadastroAberto?.titulo}`)
+  async function abrirCadastro(cadastro) {
+    setCadastroAberto(cadastro)
+    setFormularioAberto(false)
+    setRegistros([])
+    setFormulario({})
+    await carregarRegistros(cadastro)
+  }
+
+  async function carregarDependencias(cadastro) {
+    const dependencias = cadastro.dependencias || []
+    const pendentes = dependencias.filter((dependencia) => !opcoes[dependencia])
+
+    if (pendentes.length === 0) {
+      return
+    }
+
+    const resultados = await Promise.all(
+      pendentes.map(async (dependencia) => {
+        const resposta = await fetch(apiUrl(endpointsDependencias[dependencia]))
+
+        if (!resposta.ok) {
+          throw new Error('Não foi possível carregar os dados do formulário.')
+        }
+
+        return [dependencia, await resposta.json()]
+      }),
+    )
+
+    setOpcoes((opcoesAtuais) => ({
+      ...opcoesAtuais,
+      ...Object.fromEntries(resultados),
+    }))
+  }
+
+  async function incluirRegistro() {
+    setErroFormulario('')
+
+    try {
+      await carregarDependencias(cadastroAberto)
+      setFormulario(getValorInicial(cadastroAberto))
+      setFormularioAberto(true)
+    } catch (error) {
+      setErroFormulario(error.message)
+    }
+  }
+
+  function alterarCampo(nome, valor) {
+    setFormulario((valoresAtuais) => ({
+      ...valoresAtuais,
+      [nome]: valor,
+    }))
+  }
+
+  function montarPayload() {
+    return cadastroAberto.campos.reduce((payload, campo) => {
+      const valor = formulario[campo.nome]
+
+      if (campo.tipo === 'checkbox') {
+        payload[campo.nome] = valor ? 1 : 0
+        return payload
+      }
+
+      if (campo.tipo === 'number') {
+        payload[campo.nome] = valor === '' ? null : Number(valor)
+        return payload
+      }
+
+      payload[campo.nome] = typeof valor === 'string' ? valor.trim() : valor
+      return payload
+    }, {})
+  }
+
+  async function salvarRegistro(event) {
+    event.preventDefault()
+    setErroFormulario('')
+    setSalvando(true)
+
+    try {
+      const resposta = await fetch(apiUrl(cadastroAberto.endpoint), {
+        body: JSON.stringify(montarPayload()),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        method: 'POST',
+      })
+
+      if (!resposta.ok) {
+        const erroResposta = await resposta.json().catch(() => ({}))
+        throw new Error(erroResposta.error || 'Não foi possível salvar o registro.')
+      }
+
+      setFormularioAberto(false)
+      await carregarRegistros(cadastroAberto)
+    } catch (error) {
+      setErroFormulario(error.message)
+    } finally {
+      setSalvando(false)
+    }
+  }
+
+  function renderCampo(campo) {
+    const valor = formulario[campo.nome] ?? ''
+
+    if (campo.tipo === 'select') {
+      const itens = opcoes[campo.opcoes] || []
+
+      return (
+        <select
+          id={`settings-field-${campo.nome}`}
+          value={valor}
+          onChange={(event) => alterarCampo(campo.nome, event.target.value)}
+          required={campo.required}
+        >
+          <option value="">Selecione</option>
+          {itens.map((item) => (
+            <option key={item.id} value={item.id}>
+              {getOpcaoLabel(item)}
+            </option>
+          ))}
+        </select>
+      )
+    }
+
+    if (campo.tipo === 'checkbox') {
+      return (
+        <label className="settings-form__check">
+          <input
+            checked={Boolean(valor)}
+            id={`settings-field-${campo.nome}`}
+            onChange={(event) => alterarCampo(campo.nome, event.target.checked)}
+            type="checkbox"
+          />
+          <span>{campo.label}</span>
+        </label>
+      )
+    }
+
+    return (
+      <input
+        id={`settings-field-${campo.nome}`}
+        max={campo.max}
+        min={campo.min}
+        onChange={(event) => alterarCampo(campo.nome, event.target.value)}
+        required={campo.required}
+        step={campo.step}
+        type={campo.tipo || 'text'}
+        value={valor}
+      />
+    )
   }
 
   return (
@@ -252,6 +460,7 @@ function Configuracao() {
               </div>
             </header>
 
+            {erroFormulario && <p className="settings-modal__message">{erroFormulario}</p>}
             {erro && <p className="settings-modal__message">{erro}</p>}
             {carregando && <p className="settings-modal__message">Carregando...</p>}
 
@@ -287,6 +496,59 @@ function Configuracao() {
               </div>
             )}
           </section>
+
+          {formularioAberto && (
+            <section
+              className="settings-form-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="settings-form-title"
+              onMouseDown={(event) => event.stopPropagation()}
+            >
+              <header className="settings-form-modal__header">
+                <h2 id="settings-form-title">{tituloFormulario}</h2>
+                <button
+                  className="settings-modal__close"
+                  type="button"
+                  onClick={() => setFormularioAberto(false)}
+                  aria-label="Fechar inclusão"
+                  title="Fechar"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M6 6l12 12" />
+                    <path d="M18 6 6 18" />
+                  </svg>
+                </button>
+              </header>
+
+              <form className="settings-form" onSubmit={salvarRegistro}>
+                {cadastroAberto.campos.map((campo) => (
+                  <div
+                    className={`settings-form__field ${
+                      campo.tipo === 'checkbox' ? 'settings-form__field--check' : ''
+                    }`}
+                    key={campo.nome}
+                  >
+                    {campo.tipo !== 'checkbox' && (
+                      <label htmlFor={`settings-field-${campo.nome}`}>{campo.label}</label>
+                    )}
+                    {renderCampo(campo)}
+                  </div>
+                ))}
+
+                {erroFormulario && <p className="settings-form__error">{erroFormulario}</p>}
+
+                <div className="settings-form__actions">
+                  <button type="button" onClick={() => setFormularioAberto(false)}>
+                    Cancelar
+                  </button>
+                  <button className="settings-modal__include" type="submit" disabled={salvando}>
+                    {salvando ? 'Salvando...' : 'Salvar'}
+                  </button>
+                </div>
+              </form>
+            </section>
+          )}
         </div>
       )}
     </>

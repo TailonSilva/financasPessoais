@@ -38,3 +38,72 @@ routes.get('/contas', (_req, res) => {
     },
   )
 })
+
+routes.post('/contas', (req, res) => {
+  const {
+    descricao,
+    icone = null,
+    saldoInicial = 0,
+    tipo_conta_id = null,
+    banco_id = null,
+  } = req.body
+
+  if (!descricao?.trim()) {
+    return res.status(400).json({ error: 'Informe a descrição da conta.' })
+  }
+
+  const saldo = Number(saldoInicial || 0)
+
+  if (Number.isNaN(saldo)) {
+    return res.status(400).json({ error: 'Informe um saldo inicial válido.' })
+  }
+
+  db.run(
+    `INSERT INTO conta (
+      descricao,
+      icone,
+      saldoInicial,
+      saldoAtual,
+      tipo_conta_id,
+      banco_id
+    ) VALUES (?, ?, ?, ?, ?, ?)`,
+    [
+      descricao.trim(),
+      icone || null,
+      saldo,
+      saldo,
+      tipo_conta_id || null,
+      banco_id || null,
+    ],
+    function inserirConta(error) {
+      if (error) {
+        return res.status(500).json({ error: error.message })
+      }
+
+      return db.get(
+        `SELECT
+          conta.id,
+          conta.descricao,
+          conta.saldoInicial,
+          conta.saldoAtual,
+          conta.tipo_conta_id,
+          tipo_conta.descricao AS tipo_conta,
+          conta.banco_id,
+          banco.nome AS banco,
+          banco.imagem AS banco_imagem
+        FROM conta
+        LEFT JOIN tipo_conta ON tipo_conta.id = conta.tipo_conta_id
+        LEFT JOIN banco ON banco.id = conta.banco_id
+        WHERE conta.id = ?`,
+        [this.lastID],
+        (selectError, row) => {
+          if (selectError) {
+            return res.status(500).json({ error: selectError.message })
+          }
+
+          return res.status(201).json(row)
+        },
+      )
+    },
+  )
+})

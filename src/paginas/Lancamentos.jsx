@@ -5,6 +5,7 @@ import {
   MesSelector,
   PageHeader,
 } from "../componentes/PageHeader.jsx";
+import ConfirmacaoModal from "../componentes/ConfirmacaoModal.jsx";
 import { fetchCategorias, fetchContas } from "../utilitarios/fetch/cadastros.js";
 import {
   atualizarLancamento,
@@ -30,6 +31,14 @@ function getDataVencimentoInput(lancamento) {
 
 function somarLancamentos(lancamentos) {
   return lancamentos.reduce((total, lancamento) => total + Number(lancamento.valor || 0), 0);
+}
+
+function podeAlterarPagamento(lancamento) {
+  return !lancamento.fatura_cartao_id || lancamento.fatura_cartao_status === "fechada";
+}
+
+function isLancamentoFaturaCartao(lancamento) {
+  return Boolean(lancamento.fatura_cartao_id);
 }
 
 function PagoStatus({ dataPagamento }) {
@@ -61,6 +70,7 @@ function Lancamentos() {
   const [menuNovoAberto, setMenuNovoAberto] = useState(false);
   const [tipoLancamentoModal, setTipoLancamentoModal] = useState(null);
   const [modalAcao, setModalAcao] = useState(null);
+  const [edicaoRecorrentePendente, setEdicaoRecorrentePendente] = useState(null);
   const [mesSelecionado, setMesSelecionado] = useState(
     () => new Date().getMonth() + 1,
   );
@@ -188,16 +198,35 @@ function Lancamentos() {
     event.preventDefault();
     const dados = Object.fromEntries(new FormData(event.currentTarget));
     const [anoVencimento, mesVencimento, diaVencimento] = dados.data_vencimento.split("-");
+    const payload = {
+      ...dados,
+      ano_vencimento: anoVencimento,
+      data_pagamento: dados.data_pagamento || null,
+      dia_vencimento: diaVencimento,
+      mes_vencimento: mesVencimento,
+    };
 
+    if (modalAcao.lancamento.recorrencia_id) {
+      setEdicaoRecorrentePendente({
+        lancamento: modalAcao.lancamento,
+        payload,
+      });
+      return;
+    }
+
+    await aplicarEdicaoLancamento(payload, "atual");
+  }
+
+  async function aplicarEdicaoLancamento(payload, escopo) {
     try {
-      await atualizarLancamento(modalAcao.lancamento.id, {
-        ...dados,
-        ano_vencimento: anoVencimento,
-        data_pagamento: dados.data_pagamento || null,
-        dia_vencimento: diaVencimento,
-        mes_vencimento: mesVencimento,
+      const lancamento = edicaoRecorrentePendente?.lancamento || modalAcao.lancamento;
+
+      await atualizarLancamento(lancamento.id, {
+        ...payload,
+        aplicar_recorrencia: escopo,
       });
       await recarregarLancamentos();
+      setEdicaoRecorrentePendente(null);
       setModalAcao(null);
     } catch (error) {
       setErro(error.message);
@@ -219,7 +248,12 @@ function Lancamentos() {
       <PageHeader
         actions={
           <>
-            <MesSelector value={mesSelecionado} onChange={setMesSelecionado} />
+            <MesSelector
+              value={mesSelecionado}
+              onChange={setMesSelecionado}
+              year={anoSelecionado}
+              onYearChange={setAnoSelecionado}
+            />
             <AnoSelector value={anoSelecionado} onChange={setAnoSelecionado} />
             <div className="new-entry">
               <HeaderActionButton
@@ -422,22 +456,34 @@ function Lancamentos() {
           <button type="button" onClick={() => executarAcao("consultar")}>
             Consultar
           </button>
-          <button type="button" onClick={() => executarAcao("editar")}>
-            Editar
-          </button>
-          <button
-            type="button"
-            onClick={() =>
-              executarAcao(
-                menuContexto.lancamento.data_pagamento ? "cancelar-pagamento" : "pagar",
-              )
-            }
-          >
-            {menuContexto.lancamento.data_pagamento ? "Cancelar pagamento" : "Pagar"}
-          </button>
-          <button type="button" onClick={() => executarAcao("excluir")}>
-            Excluir
-          </button>
+          {!isLancamentoFaturaCartao(menuContexto.lancamento) && (
+            <>
+              <button type="button" onClick={() => executarAcao("editar")}>
+                Editar
+              </button>
+              {podeAlterarPagamento(menuContexto.lancamento) && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    executarAcao(
+                      menuContexto.lancamento.data_pagamento ? "cancelar-pagamento" : "pagar",
+                    )
+                  }
+                >
+                  {menuContexto.lancamento.tipo_lancamento === "Receita"
+                    ? menuContexto.lancamento.data_pagamento
+                      ? "Cancelar recebimento"
+                      : "Receber"
+                    : menuContexto.lancamento.data_pagamento
+                      ? "Cancelar pagamento"
+                      : "Pagar"}
+                </button>
+              )}
+              <button type="button" onClick={() => executarAcao("excluir")}>
+                Excluir
+              </button>
+            </>
+          )}
         </div>
       )}
 
@@ -547,8 +593,14 @@ function Lancamentos() {
 
               <label>
                 Data pagamento
-                <input name="data_pagamento" type="date" />
+                <input name="data_pagamento" type="date" max={getDataAtualInput()} />
               </label>
+              {tipoLancamentoModal !== "Transferência" && (
+                <label className="launch-modal__check">
+                  <input name="fixo" type="checkbox" />
+                  Lançamento fixo
+                </label>
+              )}
             </div>
 
             <footer className="launch-modal__footer">
@@ -729,6 +781,7 @@ function Lancamentos() {
                   name="data_pagamento"
                   type="date"
                   defaultValue={modalAcao.lancamento.data_pagamento || ""}
+                  max={getDataAtualInput()}
                   disabled={modalAcao.acao === "consultar"}
                 />
               </label>
@@ -743,6 +796,23 @@ function Lancamentos() {
           </form>
         </div>
       )}
+
+      <ConfirmacaoModal
+        aberto={Boolean(edicaoRecorrentePendente)}
+        titulo="Alterar lançamento fixo"
+        mensagem="Escolha como aplicar esta alteração na série."
+        onClose={() => setEdicaoRecorrentePendente(null)}
+        acoes={[
+          {
+            label: "Só este mês",
+            onClick: () => aplicarEdicaoLancamento(edicaoRecorrentePendente.payload, "atual"),
+          },
+          {
+            label: "Este e próximos meses",
+            onClick: () => aplicarEdicaoLancamento(edicaoRecorrentePendente.payload, "futuro"),
+          },
+        ]}
+      />
     </>
   );
 }

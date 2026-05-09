@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "concurrently -k -n WEB,API -c cyan,green \"npm:dev:web\" \"npm:dev:server\"",
     "dev:web": "vite --host 127.0.0.1 --port 5173",
@@ -11,9 +12,41 @@
     "db:renomear-despesa": "node src/backend/scripts/renomearDespesaParaLancamentos.js",
     "server": "npm run dev:server",
     "build": "vite build",
+    "electron": "electron .",
+    "build:electron": "npm run build && electron-builder --win nsis",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "preview": "vite preview"
+  },
+  "build": {
+    "appId": "com.financaspessoais.app",
+    "productName": "Finanças Pessoais",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "src/backend/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "src/backend/db.sqlite",
+        "to": "db.sqlite"
+      }
+    ],
+    "asarUnpack": [
+      "node_modules/sqlite3/**/*"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    }
   },
   "dependencies": {
     "express": "^5.2.1",
@@ -27,6 +60,8 @@
     "@eslint/js": "^10.0.1",
     "@vitejs/plugin-react": "^6.0.1",
     "concurrently": "^9.2.1",
+    "electron": "^39.2.7",
+    "electron-builder": "^26.0.12",
     "eslint": "^10.2.1",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",

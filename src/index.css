@@ -30,9 +30,20 @@
 
 }
 
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  background: var(--color-page-bg);
+}
+
 .container {
   padding: 20px;
   display: flex;
   flex-direction: column;
-  min-height: calc(100vh - 62px);
+  min-height: calc(100vh - 80px);
 }

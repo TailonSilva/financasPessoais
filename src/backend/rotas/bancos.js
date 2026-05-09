@@ -25,3 +25,33 @@ bancosRoutes.get('/bancos', (_req, res) => {
     },
   )
 })
+
+bancosRoutes.post('/bancos', (req, res) => {
+  const { nome, imagem = null } = req.body
+
+  if (!nome?.trim()) {
+    return res.status(400).json({ error: 'Informe o nome do banco.' })
+  }
+
+  db.run(
+    'INSERT INTO banco (nome, imagem) VALUES (?, ?)',
+    [nome.trim(), imagem || null],
+    function inserirBanco(error) {
+      if (error) {
+        return res.status(500).json({ error: error.message })
+      }
+
+      return db.get(
+        'SELECT id, nome, imagem FROM banco WHERE id = ?',
+        [this.lastID],
+        (selectError, row) => {
+          if (selectError) {
+            return res.status(500).json({ error: selectError.message })
+          }
+
+          return res.status(201).json(row)
+        },
+      )
+    },
+  )
+})
