@@ -84,6 +84,8 @@ function montarDadosLancamento(body) {
     tipo_lancamento,
     recorrencia_id,
     recorrencia_ordem,
+    parcelada,
+    quantidade_parcelas,
   } = body;
   const partesDataVencimento = data_vencimento ? data_vencimento.split("-") : [];
   const anoVencimento = ano_vencimento || partesDataVencimento[0];
@@ -106,6 +108,8 @@ function montarDadosLancamento(body) {
     descricao,
     diaVencimento,
     mesVencimento,
+    parcelada,
+    quantidade_parcelas,
     recorrencia_id,
     recorrencia_ordem,
     tipo_lancamento,
@@ -147,9 +151,10 @@ function validarDadosLancamento(dados) {
 }
 
 // Cria a rota GET que lista todas as lancamentos.
-lancamentosRoutes.get("/db-lancamentos", (_req, res) => {
+lancamentosRoutes.get("/db-lancamentos", (req, res) => {
   async function listar() {
     await garantirColunasRecorrencia();
+    const incluirInativos = req.query.incluirInativos === "1";
 
   // Executa a consulta SQL buscando lancamentos com categoria e conta.
   const rows = await all(
@@ -188,10 +193,16 @@ lancamentosRoutes.get("/db-lancamentos", (_req, res) => {
       lancamento.recorrencia_id,
       lancamento.recorrencia_ordem,
       fatura_cartao.id AS fatura_cartao_id,
-      fatura_cartao.status AS fatura_cartao_status,
+      CASE
+        WHEN fatura_cartao.id IS NOT NULL
+          AND date(
+            printf('%04d-%02d-%02d', fatura_cartao.ano_fechamento, fatura_cartao.mes_fechamento, fatura_cartao.dia_fechamento)
+          ) < date('now', 'localtime') THEN 'fechada'
+        ELSE fatura_cartao.status
+      END AS fatura_cartao_status,
       fatura_cartao.mes_referencia AS fatura_cartao_mes_referencia,
       fatura_cartao.ano_referencia AS fatura_cartao_ano_referencia,
-      COALESCE(fatura_cartao.valor_total, lancamento.valor) AS valor
+      lancamento.valor AS valor
     FROM "lançamentos" AS lancamento
     LEFT JOIN categoria ON categoria.id = lancamento.categoria_id
     LEFT JOIN conta ON conta.id = lancamento.conta_id
@@ -204,6 +215,10 @@ lancamentosRoutes.get("/db-lancamentos", (_req, res) => {
     LEFT JOIN tipo_lancamentos ON tipo_lancamentos.id = lancamento.tipo_lancamento_id
     LEFT JOIN faturas_cartao AS fatura_cartao ON fatura_cartao.lancamento_id = lancamento.id
     LEFT JOIN meses ON meses.id = lancamento.mes_vencimento
+    WHERE ${incluirInativos ? "1 = 1" : "categoria.ativo = 1"}
+      AND (${incluirInativos ? "1 = 1" : "conta.ativo = 1"})
+      AND (${incluirInativos ? "1 = 1" : "conta_origem.id IS NULL OR conta_origem.ativo = 1"})
+      AND (${incluirInativos ? "1 = 1" : "conta_destino.id IS NULL OR conta_destino.ativo = 1"})
     ORDER BY lancamento.ano_vencimento, lancamento.mes_vencimento, lancamento.dia_vencimento`,
   );
 
@@ -236,7 +251,23 @@ lancamentosRoutes.post("/db-lancamentos", (req, res) => {
     const isTransferencia = dados.tipo_lancamento === "Transferência";
     const isFixo =
       req.body.fixo === true || req.body.fixo === "true" || req.body.fixo === "on";
-    const totalLancamentos = isFixo && !isTransferencia ? 600 : 1;
+    const isParcelada =
+      req.body.parcelada === true ||
+      req.body.parcelada === "true" ||
+      req.body.parcelada === "on";
+    const quantidadeParcelas = Number(req.body.quantidade_parcelas || 1);
+
+    if (isParcelada && (!Number.isInteger(quantidadeParcelas) || quantidadeParcelas < 2)) {
+      return res.status(400).json({
+        error: "Informe uma quantidade de parcelas maior que 1.",
+      });
+    }
+
+    const totalLancamentos = isFixo
+      ? 600
+      : isParcelada
+        ? quantidadeParcelas
+        : 1;
     const recorrenciaId = totalLancamentos > 1 ? crypto.randomUUID() : null;
     const ids = [];
 
@@ -268,7 +299,9 @@ lancamentosRoutes.post("/db-lancamentos", (req, res) => {
             recorrencia_ordem
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
-            dados.descricao.trim(),
+            isParcelada
+              ? `${dados.descricao.trim()} (${index + 1}/${quantidadeParcelas})`
+              : dados.descricao.trim(),
             dataVencimento,
             index === 0 ? dados.dataPagamento : null,
             dados.categoria_id,

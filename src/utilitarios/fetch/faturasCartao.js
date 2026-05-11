@@ -81,3 +81,63 @@ export async function criarAjusteFaturaCartao(ajuste) {
 
   return response.json();
 }
+
+export async function atualizarParcelaCartao(id, parcela) {
+  const response = await fetch(apiUrl(`/api/parcelas-cartao/${id}`), {
+    body: JSON.stringify(parcela),
+    headers: {
+      "Content-Type": "application/json",
+    },
+    method: "PUT",
+  });
+
+  if (!response.ok) {
+    const erro = await response.json().catch(() => ({}));
+    throw new Error(erro.error || "NÃ£o foi possÃ­vel atualizar a parcela");
+  }
+
+  return response.json();
+}
+
+export async function excluirParcelaCartao(id, escopo = "atual") {
+  const response = await fetch(apiUrl(`/api/parcelas-cartao/${id}?escopo=${escopo}`), {
+    method: "DELETE",
+  });
+
+  if (!response.ok) {
+    const erro = await response.json().catch(() => ({}));
+    throw new Error(erro.error || "NÃ£o foi possÃ­vel excluir a parcela");
+  }
+
+  return response.json();
+}
+
+export async function atualizarAjusteFaturaCartao(id, ajuste) {
+  const response = await fetch(apiUrl(`/api/ajustes-fatura-cartao/${id}`), {
+    body: JSON.stringify(ajuste),
+    headers: {
+      "Content-Type": "application/json",
+    },
+    method: "PUT",
+  });
+
+  if (!response.ok) {
+    const erro = await response.json().catch(() => ({}));
+    throw new Error(erro.error || "NÃ£o foi possÃ­vel atualizar o lanÃ§amento da fatura");
+  }
+
+  return response.json();
+}
+
+export async function excluirAjusteFaturaCartao(id) {
+  const response = await fetch(apiUrl(`/api/ajustes-fatura-cartao/${id}`), {
+    method: "DELETE",
+  });
+
+  if (!response.ok) {
+    const erro = await response.json().catch(() => ({}));
+    throw new Error(erro.error || "NÃ£o foi possÃ­vel excluir o lanÃ§amento da fatura");
+  }
+
+  return response.json();
+}

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import logoProjeto from '../assets/logo/logo200px-sf.png'
 
 const meses = [
   'Janeiro',
@@ -23,7 +24,7 @@ export function PageHeader({ actions }) {
     <header className="page-header">
       <div className="page-header__brand">
         <span className="page-header__logo" aria-hidden="true">
-          <img src="src/assets/logo/logo200px-sf.png" alt="" />
+          <img src={logoProjeto} alt="" />
         </span>
         <h6>Minhas Finanças</h6>
       </div>

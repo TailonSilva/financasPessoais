@@ -5,10 +5,11 @@ import FluxoCaixa from './paginas/FluxoCaixa'
 import Lancamentos from './paginas/Lancamentos'
 import ContaCartao from './paginas/ContaCartao'
 import Configuracao from './paginas/Configuracao'
+import { NotificacoesProvider } from './componentes/Notificacoes'
 
 function App() {
   return (
-    <>
+    <NotificacoesProvider>
       <Sidebar />
       <main className="app-content">
         <Routes>
@@ -19,7 +20,7 @@ function App() {
           <Route path="/configuracoes" element={<Configuracao />} />
         </Routes>
       </main>
-    </>
+    </NotificacoesProvider>
   )
 }
 

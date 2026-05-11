@@ -4,6 +4,7 @@
 @import './styles/titulos.css';
 @import './styles/configuracao.css';
 @import './styles/dashboard.css';
+@import './styles/notificacoes.css';
 
 :root {
   --color-brand-blue: #1e96f2;

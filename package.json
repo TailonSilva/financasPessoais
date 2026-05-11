@@ -1,7 +1,7 @@
 {
   "name": "financas-pessoais",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.4",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -9,11 +9,13 @@
     "dev:web": "vite --host 127.0.0.1 --port 5173",
     "dev:server": "node src/backend/server.js",
     "db:excluir-receitas": "node src/backend/scripts/excluirTabelaReceitas.js",
+    "db:producao": "node src/backend/scripts/criarBancoProducao.js",
     "db:renomear-despesa": "node src/backend/scripts/renomearDespesaParaLancamentos.js",
+    "clean:electron": "node scripts/limparBuildElectron.js",
     "server": "npm run dev:server",
     "build": "vite build",
-    "electron": "electron .",
-    "build:electron": "npm run build && electron-builder --win nsis",
+    "electron": "set ELECTRON_RUN_AS_NODE=& electron .",
+    "build:electron": "npm run clean:electron && npm run db:producao && npm run build && electron-builder --win nsis --config.directories.output=release-temp && node scripts/publicarBuildElectron.js",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "preview": "vite preview"
@@ -26,13 +28,14 @@
     },
     "files": [
       "dist/**/*",
+      "build/icon.ico",
       "electron/**/*",
       "src/backend/**/*",
       "package.json"
     ],
     "extraResources": [
       {
-        "from": "src/backend/db.sqlite",
+        "from": "src/backend/db.producao.sqlite",
         "to": "db.sqlite"
       }
     ],
@@ -40,6 +43,7 @@
       "node_modules/sqlite3/**/*"
     ],
     "win": {
+      "icon": "build/icon.ico",
       "target": "nsis"
     },
     "nsis": {

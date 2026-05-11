@@ -6,15 +6,28 @@ import {
   PageHeader,
 } from "../componentes/PageHeader";
 import {
+  atualizarAjusteFaturaCartao,
+  atualizarParcelaCartao,
   criarAjusteFaturaCartao,
   criarCompraCartao,
+  excluirAjusteFaturaCartao,
+  excluirParcelaCartao,
   fetchAjustesFaturaCartao,
   fetchCartoesCredito,
   fetchFaturasCartao,
   fetchParcelasCartao,
 } from "../utilitarios/fetch/faturasCartao";
+import ConfirmacaoModal from "../componentes/ConfirmacaoModal.jsx";
 import { fetchCategorias } from "../utilitarios/fetch/cadastros";
+import { apiUrl } from "../utilitarios/fetch/api";
 import { formatarMoeda } from "../utilitarios/formatarMoeda";
+import { useNotificacoes } from "../componentes/notificacoesContext";
+
+const logosBanco = {
+  "bradesco.png": new URL("../assets/img/bradesco.png", import.meta.url).href,
+  "mercado-pago.png": new URL("../assets/img/mercado-pago.png", import.meta.url).href,
+  "nubank.png": new URL("../assets/img/nubank.png", import.meta.url).href,
+};
 
 const tiposInclusaoCartao = ["Despesa no cartão", "Estorno", "Pagamento"];
 const nomesMeses = [
@@ -36,11 +49,9 @@ function getDataAtualInput() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function gerarOpcoesPrimeiraFatura() {
-  const hoje = new Date();
-
+function gerarOpcoesPrimeiraFatura(mesInicial, anoInicial) {
   return Array.from({ length: 6 }, (_, index) => {
-    const data = new Date(hoje.getFullYear(), hoje.getMonth() + index, 1);
+    const data = new Date(Number(anoInicial), Number(mesInicial) - 1 + index, 1);
     const mes = data.getMonth() + 1;
     const ano = data.getFullYear();
 
@@ -72,7 +83,65 @@ function agruparFaturasPorCartao(faturas) {
   }, {});
 }
 
+function isCategoriaCartaoCredito(categoria) {
+  return (
+    categoria?.icone === "credit-card" ||
+    categoria?.descricao?.toLowerCase().includes("cartão de crédito") ||
+    categoria?.descricao?.toLowerCase().includes("cartao de credito")
+  );
+}
+
+function isParcelaCartao(linha) {
+  return Boolean(linha?.compra_cartao_id);
+}
+
+function isCompraParcelada(linha) {
+  return isParcelaCartao(linha) && Number(linha.total_parcelas) > 1;
+}
+
+function getImagemBancoUrl(valor) {
+  if (!valor) {
+    return "";
+  }
+
+  if (logosBanco[valor]) {
+    return logosBanco[valor];
+  }
+
+  if (valor.startsWith("uploads/")) {
+    return apiUrl(`/api/${valor}`);
+  }
+
+  return "";
+}
+
+function BancoLogo({ className = "", imagem }) {
+  const src = getImagemBancoUrl(imagem);
+
+  if (!src) {
+    return null;
+  }
+
+  return <img className={className} src={src} alt="" />;
+}
+
+function CategoriaCell({ categoria }) {
+  if (!categoria) {
+    return "-";
+  }
+
+  return (
+    <span className="invoice-table__category">
+      {categoria.icone && (
+        <span className="invoice-table__category-icon">{categoria.icone}</span>
+      )}
+      {categoria.descricao}
+    </span>
+  );
+}
+
 function ContaCartao() {
+  const { notificarErro } = useNotificacoes();
   const [faturas, setFaturas] = useState([]);
   const [parcelas, setParcelas] = useState([]);
   const [ajustes, setAjustes] = useState([]);
@@ -81,6 +150,8 @@ function ContaCartao() {
   const [menuContexto, setMenuContexto] = useState(null);
   const [menuNovoAberto, setMenuNovoAberto] = useState(false);
   const [modalInclusao, setModalInclusao] = useState(null);
+  const [modalAcao, setModalAcao] = useState(null);
+  const [acaoParceladaPendente, setAcaoParceladaPendente] = useState(null);
   const [cartaoEstornoSelecionado, setCartaoEstornoSelecionado] = useState("");
   const [mesSelecionado, setMesSelecionado] = useState(
     () => new Date().getMonth() + 1,
@@ -88,7 +159,6 @@ function ContaCartao() {
   const [anoSelecionado, setAnoSelecionado] = useState(
     () => new Date().getFullYear(),
   );
-  const [erro, setErro] = useState("");
 
   useEffect(() => {
     async function carregarDadosCartao() {
@@ -113,12 +183,12 @@ function ContaCartao() {
         setCartoes(cartoesDados);
         setCategorias(categoriasDados);
       } catch (error) {
-        setErro(error.message);
+        notificarErro(error.message);
       }
     }
 
     carregarDadosCartao();
-  }, []);
+  }, [notificarErro]);
 
   useEffect(() => {
     function fecharMenu() {
@@ -140,7 +210,7 @@ function ContaCartao() {
       Number(fatura.mes_referencia) === mesSelecionado &&
       Number(fatura.ano_referencia) === anoSelecionado,
   );
-  const opcoesPrimeiraFatura = gerarOpcoesPrimeiraFatura();
+  const opcoesPrimeiraFatura = gerarOpcoesPrimeiraFatura(mesSelecionado, anoSelecionado);
   const referenciasFuturas = new Set(opcoesPrimeiraFatura.map((opcao) => opcao.value));
   const faturasDoCartaoEstorno = faturas.filter(
     (fatura) =>
@@ -148,6 +218,12 @@ function ContaCartao() {
       referenciasFuturas.has(`${fatura.mes_referencia}-${fatura.ano_referencia}`),
   );
   const cartoesComFaturas = Object.values(agruparFaturasPorCartao(faturasDoMes));
+  const categoriasPorId = new Map(
+    categorias.map((categoria) => [Number(categoria.id), categoria]),
+  );
+  const categoriasCompraCartao = categorias.filter(
+    (categoria) => !isCategoriaCartaoCredito(categoria),
+  );
 
   function buscarParcelasDaFatura(faturaId) {
     return parcelas.filter((parcela) => parcela.fatura_cartao_id === faturaId);
@@ -169,11 +245,102 @@ function ContaCartao() {
   }
 
   function executarAcao(acao) {
-    console.log(`${acao}:`, {
-      linha: menuContexto?.linha,
-      fatura: menuContexto?.fatura,
-    });
+    const contexto = menuContexto;
     setMenuContexto(null);
+
+    if (!contexto) {
+      return;
+    }
+
+    if (acao === "excluir") {
+      if (isCompraParcelada(contexto.linha)) {
+        setAcaoParceladaPendente({
+          acao: "excluir",
+          linha: contexto.linha,
+        });
+        return;
+      }
+
+      setAcaoParceladaPendente({
+        acao: "excluir-simples",
+        linha: contexto.linha,
+      });
+      return;
+    }
+
+    setModalAcao({
+      acao,
+      linha: contexto.linha,
+      fatura: contexto.fatura,
+    });
+  }
+
+  async function excluirLinhaFatura(linha, escopo = "atual") {
+    try {
+      if (isParcelaCartao(linha)) {
+        await excluirParcelaCartao(linha.id, escopo);
+      } else {
+        await excluirAjusteFaturaCartao(linha.id);
+      }
+
+      await recarregarDadosCartao();
+      setAcaoParceladaPendente(null);
+      setModalAcao(null);
+    } catch (error) {
+      notificarErro(error.message);
+    }
+  }
+
+  async function aplicarEdicaoLinhaFatura(payload, escopo = "atual") {
+    try {
+      if (isParcelaCartao(payload.linha)) {
+        await atualizarParcelaCartao(payload.linha.id, {
+          descricao: payload.descricao,
+          categoria_id: payload.categoria_id || null,
+          valor_parcela: payload.valor,
+          escopo,
+        });
+      } else {
+        await atualizarAjusteFaturaCartao(payload.linha.id, {
+          descricao: payload.descricao,
+          valor: payload.valor,
+          data_ajuste: payload.data_ajuste || null,
+        });
+      }
+
+      await recarregarDadosCartao();
+      setAcaoParceladaPendente(null);
+      setModalAcao(null);
+    } catch (error) {
+      notificarErro(error.message);
+    }
+  }
+
+  function salvarAcaoFatura(event) {
+    event.preventDefault();
+
+    if (!modalAcao || modalAcao.acao !== "editar") {
+      return;
+    }
+
+    const dados = Object.fromEntries(new FormData(event.currentTarget));
+    const payload = {
+      linha: modalAcao.linha,
+      descricao: dados.descricao,
+      categoria_id: dados.categoria_id,
+      valor: dados.valor,
+      data_ajuste: dados.data_ajuste,
+    };
+
+    if (isCompraParcelada(modalAcao.linha)) {
+      setAcaoParceladaPendente({
+        acao: "editar",
+        payload,
+      });
+      return;
+    }
+
+    aplicarEdicaoLinhaFatura(payload, "atual");
   }
 
   async function recarregarDadosCartao() {
@@ -202,7 +369,7 @@ function ContaCartao() {
           cartao_id: dados.cartao_id,
           categoria_id: dados.categoria_id || null,
           descricao: dados.descricao,
-          valor_total: dados.valor_total,
+          valor_parcela: dados.valor_parcela,
           quantidade_parcelas: dados.quantidade_parcelas,
           primeira_fatura_mes: primeiraFaturaMes,
           primeira_fatura_ano: primeiraFaturaAno,
@@ -225,7 +392,7 @@ function ContaCartao() {
       await recarregarDadosCartao();
       setModalInclusao(null);
     } catch (error) {
-      setErro(error.message);
+      notificarErro(error.message);
     }
   }
 
@@ -279,8 +446,6 @@ function ContaCartao() {
 
       <div className="container">
         <h1>Cartões de crédito</h1>
-        {erro && <p>{erro}</p>}
-
         {cartoesComFaturas.length === 0 && (
           <div className="box-grid">
             <p>Nenhuma fatura de cartão cadastrada para o mês selecionado.</p>
@@ -290,13 +455,7 @@ function ContaCartao() {
         {cartoesComFaturas.map((cartao) => (
           <div className="box-grid" key={cartao.cartao_id}>
             <h2>
-              {cartao.banco_imagem && (
-                <img
-                  className="grid-title-icon"
-                  src={"src/assets/img/" + cartao.banco_imagem}
-                  alt=""
-                />
-              )}
+              <BancoLogo className="grid-title-icon" imagem={cartao.banco_imagem} />
               {cartao.cartao}
             </h2>
 
@@ -319,7 +478,8 @@ function ContaCartao() {
                         </span>
                       </div>
                       <div>
-                        <strong>{formatarMoeda(fatura.valor_total)}</strong>
+                        <strong>{formatarMoeda(fatura.valor_aberto ?? fatura.valor_total)}</strong>
+                        <span>Em aberto de {formatarMoeda(fatura.valor_total)}</span>
                         <span>
                           Vence em {String(fatura.dia_vencimento).padStart(2, "0")}/
                           {String(fatura.mes_vencimento).padStart(2, "0")}/
@@ -328,10 +488,20 @@ function ContaCartao() {
                       </div>
                     </div>
 
-                    <table className="grid">
+                    <table className="grid invoice-table">
+                      <colgroup>
+                        <col className="invoice-table__col-description" />
+                        <col className="invoice-table__col-category" />
+                        <col className="invoice-table__col-installment" />
+                        <col className="invoice-table__col-account" />
+                        <col className="invoice-table__col-status" />
+                        <col className="invoice-table__col-launch" />
+                        <col className="invoice-table__col-value" />
+                      </colgroup>
                       <thead>
                         <tr>
                           <th>Descrição</th>
+                          <th>Categoria</th>
                           <th>Parcela</th>
                           <th>Conta Pagamento</th>
                           <th>Status</th>
@@ -346,19 +516,27 @@ function ContaCartao() {
                             className="grid-row--context"
                             onContextMenu={(event) => abrirMenuContexto(event, parcela, fatura)}
                           >
-                            <td>{parcela.compra}</td>
-                            <td>
+                            <td className="invoice-table__text">{parcela.compra}</td>
+                            <td className="invoice-table__text">
+                              <CategoriaCell
+                                categoria={
+                                  categoriasPorId.get(Number(parcela.categoria_id)) ||
+                                  (parcela.categoria
+                                    ? { descricao: parcela.categoria }
+                                    : null)
+                                }
+                              />
+                            </td>
+                            <td className="invoice-table__center">
                               {parcela.numero_parcela}/{parcela.total_parcelas}
                             </td>
-                            <td>
-                              {fatura.banco_imagem && (
-                                <img src={"src/assets/img/" + fatura.banco_imagem} alt="" />
-                              )}
+                            <td className="invoice-table__account">
+                              <BancoLogo imagem={fatura.banco_imagem} />
                               {fatura.conta_pagamento}
                             </td>
-                            <td>{fatura.status}</td>
-                            <td>{fatura.lancamento_id}</td>
-                            <td>{formatarMoeda(parcela.valor_parcela)}</td>
+                            <td className="invoice-table__center">{fatura.status}</td>
+                            <td className="invoice-table__center">{fatura.lancamento_id}</td>
+                            <td className="invoice-table__money">{formatarMoeda(parcela.valor_parcela)}</td>
                           </tr>
                         ))}
                         {ajustesDaFatura.map((ajuste) => (
@@ -367,24 +545,33 @@ function ContaCartao() {
                             className="grid-row--context grid-row--refund"
                             onContextMenu={(event) => abrirMenuContexto(event, ajuste, fatura)}
                           >
-                            <td>{ajuste.descricao}</td>
-                            <td>{ajuste.tipo === "pagamento" ? "Pagamento" : "Estorno"}</td>
-                            <td>
-                              {fatura.banco_imagem && (
-                                <img src={"src/assets/img/" + fatura.banco_imagem} alt="" />
-                              )}
+                            <td className="invoice-table__text">{ajuste.descricao}</td>
+                            <td className="invoice-table__text">-</td>
+                            <td className="invoice-table__center">{ajuste.tipo === "pagamento" ? "Pagamento" : "Estorno"}</td>
+                            <td className="invoice-table__account">
+                              <BancoLogo imagem={fatura.banco_imagem} />
                               {fatura.conta_pagamento}
                             </td>
-                            <td>{fatura.status}</td>
-                            <td>{fatura.lancamento_id}</td>
-                            <td>{formatarMoeda(-Number(ajuste.valor))}</td>
+                            <td className="invoice-table__center">{fatura.status}</td>
+                            <td className="invoice-table__center">{fatura.lancamento_id}</td>
+                            <td className="invoice-table__money">{formatarMoeda(-Number(ajuste.valor))}</td>
                           </tr>
                         ))}
                       </tbody>
                       <tfoot>
                         <tr>
-                          <td colSpan="5">Total da fatura</td>
-                          <td>{formatarMoeda(fatura.valor_total)}</td>
+                          <td className="invoice-table__total-label" colSpan="6">Total da fatura</td>
+                          <td className="invoice-table__money">{formatarMoeda(fatura.valor_total)}</td>
+                        </tr>
+                        <tr>
+                          <td className="invoice-table__total-label" colSpan="6">Total pago</td>
+                          <td className="invoice-table__money">{formatarMoeda(fatura.valor_pago || 0)}</td>
+                        </tr>
+                        <tr>
+                          <td className="invoice-table__total-label" colSpan="6">Em aberto</td>
+                          <td className="invoice-table__money">
+                            {formatarMoeda(fatura.valor_aberto ?? fatura.valor_total)}
+                          </td>
                         </tr>
                       </tfoot>
                     </table>
@@ -411,6 +598,151 @@ function ContaCartao() {
           <button type="button" onClick={() => executarAcao("excluir")}>
             Excluir
           </button>
+        </div>
+      )}
+
+      {modalAcao && (
+        <div
+          className="launch-modal"
+          role="presentation"
+          onMouseDown={() => setModalAcao(null)}
+        >
+          <form
+            className="launch-modal__panel"
+            onSubmit={salvarAcaoFatura}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <header className="launch-modal__header">
+              <div>
+                <h2>
+                  {modalAcao.acao === "consultar" ? "Consultar fatura" : "Editar fatura"}
+                </h2>
+                <p>
+                  {isParcelaCartao(modalAcao.linha)
+                    ? "Despesa no cartão"
+                    : modalAcao.linha.tipo === "pagamento"
+                      ? "Pagamento"
+                      : "Estorno"}
+                </p>
+              </div>
+              <button
+                className="launch-modal__close"
+                type="button"
+                onClick={() => setModalAcao(null)}
+                aria-label="Fechar"
+                title="Fechar"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M6 6l12 12" />
+                  <path d="M18 6 6 18" />
+                </svg>
+              </button>
+            </header>
+
+            <div className="launch-modal__fields">
+              {isParcelaCartao(modalAcao.linha) ? (
+                <>
+                  <label>
+                    Descrição
+                    <input
+                      name="descricao"
+                      type="text"
+                      defaultValue={modalAcao.linha.compra}
+                      disabled={modalAcao.acao === "consultar"}
+                      required
+                    />
+                  </label>
+                  <label>
+                    Categoria
+                    <select
+                      name="categoria_id"
+                      defaultValue={modalAcao.linha.categoria_id || ""}
+                      disabled={modalAcao.acao === "consultar"}
+                    >
+                      <option value="">Sem categoria</option>
+                      {categoriasCompraCartao.map((categoria) => (
+                        <option key={categoria.id} value={categoria.id}>
+                          {categoria.descricao}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Parcela
+                    <input
+                      type="text"
+                      value={`${modalAcao.linha.numero_parcela}/${modalAcao.linha.total_parcelas}`}
+                      disabled
+                      readOnly
+                    />
+                  </label>
+                  <label>
+                    Valor da parcela
+                    <input
+                      name="valor"
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      defaultValue={modalAcao.linha.valor_parcela}
+                      disabled={modalAcao.acao === "consultar"}
+                      required
+                    />
+                  </label>
+                </>
+              ) : (
+                <>
+                  <label>
+                    Descrição
+                    <input
+                      name="descricao"
+                      type="text"
+                      defaultValue={modalAcao.linha.descricao}
+                      disabled={modalAcao.acao === "consultar"}
+                      required
+                    />
+                  </label>
+                  <label>
+                    Tipo
+                    <input
+                      type="text"
+                      value={modalAcao.linha.tipo === "pagamento" ? "Pagamento" : "Estorno"}
+                      disabled
+                      readOnly
+                    />
+                  </label>
+                  <label>
+                    Valor
+                    <input
+                      name="valor"
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      defaultValue={modalAcao.linha.valor}
+                      disabled={modalAcao.acao === "consultar"}
+                      required
+                    />
+                  </label>
+                  <label>
+                    Data
+                    <input
+                      name="data_ajuste"
+                      type="date"
+                      defaultValue={modalAcao.linha.data_ajuste || ""}
+                      max={getDataAtualInput()}
+                      disabled={modalAcao.acao === "consultar"}
+                    />
+                  </label>
+                </>
+              )}
+            </div>
+
+            <footer className="launch-modal__footer">
+              <button type="button" onClick={() => setModalAcao(null)}>
+                {modalAcao.acao === "consultar" ? "Fechar" : "Cancelar"}
+              </button>
+              {modalAcao.acao === "editar" && <button type="submit">Salvar</button>}
+            </footer>
+          </form>
         </div>
       )}
 
@@ -466,7 +798,7 @@ function ContaCartao() {
                     Categoria
                     <select name="categoria_id">
                       <option value="">Sem categoria</option>
-                      {categorias.map((categoria) => (
+                      {categoriasCompraCartao.map((categoria) => (
                         <option key={categoria.id} value={categoria.id}>
                           {categoria.descricao}
                         </option>
@@ -474,8 +806,8 @@ function ContaCartao() {
                     </select>
                   </label>
                   <label>
-                    Valor total
-                    <input name="valor_total" type="number" min="0.01" step="0.01" required />
+                    Valor da parcela
+                    <input name="valor_parcela" type="number" min="0.01" step="0.01" required />
                   </label>
                   <label>
                     Parcelas
@@ -572,6 +904,58 @@ function ContaCartao() {
           </form>
         </div>
       )}
+
+      <ConfirmacaoModal
+        aberto={Boolean(acaoParceladaPendente)}
+        titulo={
+          acaoParceladaPendente?.acao === "excluir-simples"
+            ? "Excluir registro da fatura"
+            : acaoParceladaPendente?.acao === "excluir"
+            ? "Excluir compra parcelada"
+            : "Alterar compra parcelada"
+        }
+        mensagem={
+          acaoParceladaPendente?.acao === "excluir-simples"
+            ? "Tem certeza que deseja excluir este registro da fatura?"
+            : acaoParceladaPendente?.acao === "editar"
+              ? "Escolha como aplicar esta alteração na compra parcelada. Ao alterar só esta parcela, apenas o valor será alterado."
+              : "Escolha como aplicar esta exclusão na compra parcelada."
+        }
+        onClose={() => setAcaoParceladaPendente(null)}
+        acoes={
+          acaoParceladaPendente?.acao === "excluir-simples"
+            ? [
+                {
+                  label: "Excluir",
+                  onClick: () => excluirLinhaFatura(acaoParceladaPendente.linha, "atual"),
+                },
+              ]
+            : [
+                {
+                  label: "Só esta parcela",
+                  onClick: () => {
+                    if (acaoParceladaPendente?.acao === "excluir") {
+                      excluirLinhaFatura(acaoParceladaPendente.linha, "atual");
+                      return;
+                    }
+
+                    aplicarEdicaoLinhaFatura(acaoParceladaPendente.payload, "atual");
+                  },
+                },
+                {
+                  label: "Esta e próximas parcelas",
+                  onClick: () => {
+                    if (acaoParceladaPendente?.acao === "excluir") {
+                      excluirLinhaFatura(acaoParceladaPendente.linha, "futuro");
+                      return;
+                    }
+
+                    aplicarEdicaoLinhaFatura(acaoParceladaPendente.payload, "futuro");
+                  },
+                },
+              ]
+        }
+      />
     </>
   );
 }

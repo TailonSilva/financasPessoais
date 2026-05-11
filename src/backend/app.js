@@ -1,5 +1,7 @@
 // Importa o Express para criar a aplicação HTTP.
 import express from "express";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 // Importa as rotas de bancos.
 import { bancosRoutes } from "./rotas/bancos.js";
 // Importa as rotas de cartões de crédito.
@@ -15,9 +17,13 @@ import { tiposContaRoutes } from "./rotas/tiposConta.js";
 
 // Cria e exporta a aplicação Express.
 export const app = express();
+const filename = fileURLToPath(import.meta.url);
+const dirname = path.dirname(filename);
+const uploadsPath = process.env.UPLOADS_PATH || path.join(dirname, "uploads");
 
 // Habilita o Express para receber JSON no corpo das requisições.
-app.use(express.json());
+app.use(express.json({ limit: "10mb" }));
+app.use("/uploads", express.static(uploadsPath));
 // Registra as rotas de bancos na aplicação.
 app.use(bancosRoutes);
 // Registra as rotas de cartões de crédito na aplicação.

@@ -363,3 +363,224 @@
   cursor: not-allowed;
   opacity: 0.65;
 }
+
+.settings-logo-options {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.settings-logo-option {
+  align-items: center;
+  background: var(--color-page-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-height: 86px;
+  padding: 10px;
+}
+
+.settings-logo-option input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.settings-logo-option img {
+  height: 28px;
+  object-fit: contain;
+  width: 48px;
+}
+
+.settings-logo-option span {
+  color: var(--color-text);
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.settings-logo-option--selected {
+  background: var(--color-brand-blue-soft);
+  border-color: var(--color-brand-blue);
+}
+
+.settings-logo-cell,
+.settings-color-cell {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+}
+
+.settings-logo-cell img {
+  height: 22px;
+  object-fit: contain;
+  width: 34px;
+}
+
+.settings-color-cell span {
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  display: inline-block;
+  height: 16px;
+  width: 16px;
+}
+
+.settings-upload-logo {
+  display: grid;
+  gap: 10px;
+}
+
+.settings-upload-logo__button {
+  align-items: center;
+  background: var(--color-page-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  color: var(--color-text);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 13px;
+  font-weight: 800;
+  height: 38px;
+  justify-content: center;
+  padding: 0 14px;
+  width: fit-content;
+}
+
+.settings-upload-logo__button:hover,
+.settings-upload-logo__button:focus-within {
+  background: var(--color-brand-blue-soft);
+  border-color: var(--color-brand-blue);
+  color: var(--color-brand-blue);
+}
+
+.settings-upload-logo__button input {
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+}
+
+.settings-upload-logo__preview,
+.settings-upload-logo__empty {
+  align-items: center;
+  background: var(--color-page-bg);
+  border: 1px dashed var(--color-border);
+  border-radius: 8px;
+  display: flex;
+  height: 86px;
+  justify-content: center;
+}
+
+.settings-upload-logo__preview img {
+  max-height: 58px;
+  max-width: 160px;
+  object-fit: contain;
+}
+
+.settings-upload-logo__empty {
+  color: var(--color-muted);
+  font-size: 13px;
+}
+
+.settings-image-editor {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: 0 24px 70px rgba(20, 31, 48, 0.28);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  left: 50%;
+  padding: 18px;
+  position: fixed;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 560px;
+  z-index: 240;
+}
+
+.settings-image-editor__canvas {
+  align-items: center;
+  background:
+    linear-gradient(45deg, #eef2f7 25%, transparent 25%),
+    linear-gradient(-45deg, #eef2f7 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #eef2f7 75%),
+    linear-gradient(-45deg, transparent 75%, #eef2f7 75%);
+  background-color: #ffffff;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+  background-size: 16px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  display: flex;
+  height: 260px;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.settings-image-editor__canvas img {
+  max-height: 210px;
+  max-width: 390px;
+  object-fit: contain;
+}
+
+.settings-image-editor__controls {
+  display: grid;
+  gap: 10px;
+}
+
+.settings-image-editor__controls label {
+  color: var(--color-text);
+  display: grid;
+  font-size: 13px;
+  font-weight: 800;
+  gap: 6px;
+}
+
+.settings-image-editor__controls input {
+  accent-color: var(--color-brand-blue);
+}
+
+.settings-status {
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 4px 10px;
+}
+
+.settings-status--active {
+  background: rgba(24, 166, 97, 0.12);
+  color: var(--color-brand-green);
+}
+
+.settings-status--inactive {
+  background: rgba(229, 75, 63, 0.12);
+  color: var(--color-brand-red);
+}
+
+.settings-grid-actions {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.settings-grid-actions button {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  color: var(--color-text);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+  height: 30px;
+  padding: 0 10px;
+}
+
+.settings-grid-actions button:hover,
+.settings-grid-actions button:focus-visible {
+  background: var(--color-brand-blue-soft);
+  border-color: var(--color-brand-blue);
+  color: var(--color-brand-blue);
+  outline: none;
+}

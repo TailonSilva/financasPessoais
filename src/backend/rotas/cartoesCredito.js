@@ -4,6 +4,7 @@ import { db } from '../db.js'
 export const cartoesCreditoRoutes = Router()
 
 const LANCAMENTOS_TABLE = '"lançamentos"'
+const CENTAVO = 0.005
 
 function all(sql, params = []) {
   return new Promise((resolve, reject) => {
@@ -55,17 +56,6 @@ function addMonths(mes, ano, quantidadeMeses) {
 
 function formatDate(ano, mes, dia) {
   return `${ano}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`
-}
-
-function splitValorEmParcelas(valorTotal, quantidadeParcelas) {
-  const totalCentavos = Math.round(Number(valorTotal) * 100)
-  const valorBase = Math.floor(totalCentavos / quantidadeParcelas)
-  const resto = totalCentavos % quantidadeParcelas
-
-  return Array.from({ length: quantidadeParcelas }, (_item, index) => {
-    const centavos = valorBase + (index < resto ? 1 : 0)
-    return centavos / 100
-  })
 }
 
 async function getTipoDespesaId() {
@@ -295,17 +285,27 @@ async function atualizarValorFatura(faturaId) {
         SELECT SUM(valor_parcela)
         FROM parcelas_cartao
         WHERE fatura_cartao_id = ?
-      ), 0)
-      -
+      ), 0) AS total_compras,
       COALESCE((
         SELECT SUM(valor)
         FROM ajustes_fatura_cartao
-        WHERE fatura_cartao_id = ? AND tipo IN ('estorno', 'pagamento')
-      ), 0) AS valor_total`,
-    [faturaId, faturaId],
+        WHERE fatura_cartao_id = ? AND tipo IN ('estorno', 'ajuste')
+      ), 0) AS total_estornos,
+      COALESCE((
+        SELECT SUM(valor)
+        FROM ajustes_fatura_cartao
+        WHERE fatura_cartao_id = ? AND tipo = 'pagamento'
+      ), 0) AS total_pagamentos,
+      (
+        SELECT MAX(data_ajuste)
+        FROM ajustes_fatura_cartao
+        WHERE fatura_cartao_id = ? AND tipo = 'pagamento'
+      ) AS ultima_data_pagamento`,
+    [faturaId, faturaId, faturaId, faturaId],
   )
 
-  const valorTotal = Math.max(Number(total.valor_total), 0)
+  const valorTotal = Math.max(Number(total.total_compras) - Number(total.total_estornos), 0)
+  const valorAberto = Math.max(valorTotal - Number(total.total_pagamentos), 0)
   const fatura = await get('SELECT * FROM faturas_cartao WHERE id = ?', [faturaId])
 
   await run('UPDATE faturas_cartao SET valor_total = ? WHERE id = ?', [
@@ -313,12 +313,52 @@ async function atualizarValorFatura(faturaId) {
     faturaId,
   ])
 
+  await reconciliarLancamentosPagamentoFatura({ faturaId, valorTotal })
+
+  const pagamentosLancados = await get(
+    `SELECT COALESCE(SUM(valor), 0) AS total
+    FROM ajustes_fatura_cartao
+    WHERE fatura_cartao_id = ? AND tipo = 'pagamento' AND lancamento_id IS NOT NULL`,
+    [faturaId],
+  )
+  const valorLancamentoFatura =
+    valorAberto <= CENTAVO
+      ? Math.max(valorTotal - Number(pagamentosLancados.total || 0), 0)
+      : valorAberto
+  const dataPagamentoFatura =
+    valorTotal > 0 && valorAberto <= 0
+      ? total.ultima_data_pagamento || new Date().toISOString().slice(0, 10)
+      : null
+
   if (fatura.lancamento_id) {
-    await run(`UPDATE ${LANCAMENTOS_TABLE} SET valor = ? WHERE id = ?`, [
-      valorTotal,
+    await run(`UPDATE ${LANCAMENTOS_TABLE} SET valor = ?, data_pagamento = ? WHERE id = ?`, [
+      valorLancamentoFatura,
+      dataPagamentoFatura,
       fatura.lancamento_id,
     ])
   }
+}
+
+async function buscarParcelaCompletaPorId(id) {
+  return get(
+    `SELECT
+      parcelas_cartao.*,
+      compras_cartao.descricao,
+      compras_cartao.categoria_id
+    FROM parcelas_cartao
+    LEFT JOIN compras_cartao ON compras_cartao.id = parcelas_cartao.compra_cartao_id
+    WHERE parcelas_cartao.id = ?`,
+    [id],
+  )
+}
+
+async function listarFaturasDaCompra(compraCartaoId, numeroParcelaInicial = 1) {
+  return all(
+    `SELECT DISTINCT fatura_cartao_id
+    FROM parcelas_cartao
+    WHERE compra_cartao_id = ? AND numero_parcela >= ?`,
+    [compraCartaoId, numeroParcelaInicial],
+  )
 }
 
 async function buscarAjusteCompletoPorId(id) {
@@ -337,7 +377,7 @@ async function buscarAjusteCompletoPorId(id) {
   )
 }
 
-async function listarAjustesFaturaCartao() {
+async function listarAjustesFaturaCartao({ incluirInativos = false } = {}) {
   return all(
     `SELECT
       ajustes_fatura_cartao.*,
@@ -348,6 +388,7 @@ async function listarAjustesFaturaCartao() {
     FROM ajustes_fatura_cartao
     LEFT JOIN faturas_cartao ON faturas_cartao.id = ajustes_fatura_cartao.fatura_cartao_id
     LEFT JOIN cartoes_credito ON cartoes_credito.id = faturas_cartao.cartao_id
+    WHERE ${incluirInativos ? '1 = 1' : 'cartoes_credito.ativo = 1'}
     ORDER BY faturas_cartao.ano_referencia, faturas_cartao.mes_referencia, ajustes_fatura_cartao.id`,
   )
 }
@@ -404,6 +445,90 @@ async function criarLancamentoPagamentoFatura({ fatura, descricao, valor, dataPa
   return result.lastID
 }
 
+async function atualizarLancamentoPagamentoFatura({
+  lancamentoId,
+  descricao,
+  valor,
+  dataPagamento,
+}) {
+  const dataBase = dataPagamento || new Date().toISOString().slice(0, 10)
+  const [anoPagamento, mesPagamento, diaPagamento] = dataBase.split('-')
+
+  await run(
+    `UPDATE ${LANCAMENTOS_TABLE}
+    SET descricao = ?,
+      valor = ?,
+      data_vencimento = ?,
+      data_pagamento = ?,
+      dia_vencimento = ?,
+      mes_vencimento = ?,
+      ano_vencimento = ?
+    WHERE id = ?`,
+    [
+      descricao,
+      valor,
+      dataBase,
+      dataBase,
+      diaPagamento,
+      mesPagamento,
+      anoPagamento,
+      lancamentoId,
+    ],
+  )
+}
+
+async function reconciliarLancamentosPagamentoFatura({ faturaId, valorTotal }) {
+  const fatura = await getFaturaPorId(faturaId)
+
+  if (!fatura) {
+    return
+  }
+
+  const pagamentos = await all(
+    `SELECT *
+    FROM ajustes_fatura_cartao
+    WHERE fatura_cartao_id = ? AND tipo = 'pagamento'
+    ORDER BY id`,
+    [faturaId],
+  )
+  let totalPagoAntes = 0
+
+  for (const pagamento of pagamentos) {
+    const valorPagamento = Number(pagamento.valor || 0)
+    const pagamentoParcial = totalPagoAntes + valorPagamento < Number(valorTotal) - CENTAVO
+
+    if (pagamentoParcial) {
+      if (pagamento.lancamento_id) {
+        await atualizarLancamentoPagamentoFatura({
+          lancamentoId: pagamento.lancamento_id,
+          descricao: pagamento.descricao,
+          valor: pagamento.valor,
+          dataPagamento: pagamento.data_ajuste,
+        })
+      } else {
+        const lancamentoId = await criarLancamentoPagamentoFatura({
+          fatura,
+          descricao: pagamento.descricao,
+          valor: pagamento.valor,
+          dataPagamento: pagamento.data_ajuste,
+        })
+
+        await run('UPDATE ajustes_fatura_cartao SET lancamento_id = ? WHERE id = ?', [
+          lancamentoId,
+          pagamento.id,
+        ])
+      }
+    } else if (pagamento.lancamento_id) {
+      await run(`DELETE FROM ${LANCAMENTOS_TABLE} WHERE id = ?`, [pagamento.lancamento_id])
+      await run('UPDATE ajustes_fatura_cartao SET lancamento_id = NULL WHERE id = ?', [
+        pagamento.id,
+      ])
+    }
+
+    totalPagoAntes += valorPagamento
+  }
+}
+
 function isDiaValido(dia) {
   return Number.isInteger(Number(dia)) && Number(dia) >= 1 && Number(dia) <= 31
 }
@@ -429,8 +554,9 @@ async function buscarCartaoCompletoPorId(id) {
   )
 }
 
-cartoesCreditoRoutes.get('/cartoes-credito', async (_req, res) => {
+cartoesCreditoRoutes.get('/cartoes-credito', async (req, res) => {
   try {
+    const incluirInativos = req.query.incluirInativos === '1'
     const rows = await all(
       `SELECT
         cartoes_credito.id,
@@ -446,6 +572,9 @@ cartoesCreditoRoutes.get('/cartoes-credito', async (_req, res) => {
       FROM cartoes_credito
       LEFT JOIN conta ON conta.id = cartoes_credito.conta_id
       LEFT JOIN banco ON banco.id = conta.banco_id
+      WHERE ${incluirInativos ? '1 = 1' : 'cartoes_credito.ativo = 1'}
+        AND (${incluirInativos ? '1 = 1' : 'conta.id IS NULL OR conta.ativo = 1'})
+        AND (${incluirInativos ? '1 = 1' : 'banco.id IS NULL OR banco.ativo = 1'})
       ORDER BY cartoes_credito.id`,
     )
 
@@ -519,11 +648,107 @@ cartoesCreditoRoutes.post('/cartoes-credito', async (req, res) => {
   }
 })
 
-cartoesCreditoRoutes.get('/faturas-cartao', async (_req, res) => {
+cartoesCreditoRoutes.put('/cartoes-credito/:id', async (req, res) => {
   try {
+    const { descricao, conta_id, limite, dia_fechamento, dia_vencimento, ativo = 1 } = req.body
+
+    if (!descricao || !conta_id || !limite || !dia_fechamento || !dia_vencimento) {
+      return res.status(400).json({
+        error: 'Informe descricao, conta_id, limite, dia_fechamento e dia_vencimento.',
+      })
+    }
+
+    if (Number(limite) <= 0) {
+      return res.status(400).json({ error: 'O limite deve ser maior que zero.' })
+    }
+
+    if (!isDiaValido(dia_fechamento) || !isDiaValido(dia_vencimento)) {
+      return res.status(400).json({
+        error: 'dia_fechamento e dia_vencimento devem estar entre 1 e 31.',
+      })
+    }
+
+    const conta = await get('SELECT id FROM conta WHERE id = ?', [conta_id])
+
+    if (!conta) {
+      return res.status(404).json({ error: 'Conta não encontrada.' })
+    }
+
+    const result = await run(
+      `UPDATE cartoes_credito
+      SET descricao = ?,
+        conta_id = ?,
+        limite = ?,
+        dia_fechamento = ?,
+        dia_vencimento = ?,
+        ativo = ?
+      WHERE id = ?`,
+      [descricao, conta_id, limite, dia_fechamento, dia_vencimento, ativo, req.params.id],
+    )
+
+    if (result.changes === 0) {
+      return res.status(404).json({ error: 'Cartão de crédito não encontrado.' })
+    }
+
+    const cartao = await buscarCartaoCompletoPorId(req.params.id)
+
+    return res.json(cartao)
+  } catch (error) {
+    return res.status(500).json({ error: error.message })
+  }
+})
+
+cartoesCreditoRoutes.patch('/cartoes-credito/:id/ativo', async (req, res) => {
+  try {
+    const ativo = req.body.ativo ? 1 : 0
+    const result = await run('UPDATE cartoes_credito SET ativo = ? WHERE id = ?', [
+      ativo,
+      req.params.id,
+    ])
+
+    if (result.changes === 0) {
+      return res.status(404).json({ error: 'Cartão de crédito não encontrado.' })
+    }
+
+    return res.json({ id: Number(req.params.id), ativo })
+  } catch (error) {
+    return res.status(500).json({ error: error.message })
+  }
+})
+
+cartoesCreditoRoutes.get('/faturas-cartao', async (req, res) => {
+  try {
+    const incluirInativos = req.query.incluirInativos === '1'
+    const faturas = await all('SELECT id FROM faturas_cartao')
+
+    for (const fatura of faturas) {
+      await atualizarValorFatura(fatura.id)
+    }
+
     const rows = await all(
       `SELECT
         faturas_cartao.*,
+        COALESCE((
+          SELECT SUM(valor)
+          FROM ajustes_fatura_cartao
+          WHERE ajustes_fatura_cartao.fatura_cartao_id = faturas_cartao.id
+            AND ajustes_fatura_cartao.tipo = 'pagamento'
+        ), 0) AS valor_pago,
+        MAX(
+          faturas_cartao.valor_total - COALESCE((
+            SELECT SUM(valor)
+            FROM ajustes_fatura_cartao
+            WHERE ajustes_fatura_cartao.fatura_cartao_id = faturas_cartao.id
+              AND ajustes_fatura_cartao.tipo = 'pagamento'
+          ), 0),
+          0
+        ) AS valor_aberto,
+        CASE
+          WHEN date(
+            printf('%04d-%02d-%02d', faturas_cartao.ano_fechamento, faturas_cartao.mes_fechamento, faturas_cartao.dia_fechamento)
+          ) < date('now', 'localtime') THEN 'fechada'
+          ELSE faturas_cartao.status
+        END AS status,
         cartoes_credito.descricao AS cartao,
         conta.descricao AS conta_pagamento,
         banco.nome AS banco,
@@ -538,6 +763,9 @@ cartoesCreditoRoutes.get('/faturas-cartao', async (_req, res) => {
       LEFT JOIN meses AS mes_referencia ON mes_referencia.id = faturas_cartao.mes_referencia
       LEFT JOIN meses AS mes_fechamento ON mes_fechamento.id = faturas_cartao.mes_fechamento
       LEFT JOIN meses AS mes_vencimento ON mes_vencimento.id = faturas_cartao.mes_vencimento
+      WHERE ${incluirInativos ? '1 = 1' : 'cartoes_credito.ativo = 1'}
+        AND (${incluirInativos ? '1 = 1' : 'conta.id IS NULL OR conta.ativo = 1'})
+        AND (${incluirInativos ? '1 = 1' : 'banco.id IS NULL OR banco.ativo = 1'})
       ORDER BY faturas_cartao.ano_referencia, faturas_cartao.mes_referencia, faturas_cartao.cartao_id`,
     )
 
@@ -603,9 +831,11 @@ cartoesCreditoRoutes.post('/faturas-cartao/gerar-mensais', async (req, res) => {
   }
 })
 
-cartoesCreditoRoutes.get('/ajustes-fatura-cartao', async (_req, res) => {
+cartoesCreditoRoutes.get('/ajustes-fatura-cartao', async (req, res) => {
   try {
-    const rows = await listarAjustesFaturaCartao()
+    const rows = await listarAjustesFaturaCartao({
+      incluirInativos: req.query.incluirInativos === '1',
+    })
 
     return res.json(rows)
   } catch (error) {
@@ -641,24 +871,13 @@ cartoesCreditoRoutes.post('/ajustes-fatura-cartao', async (req, res) => {
       })
     }
 
-    const fatura = await getFaturaPorId(fatura_cartao_id)
+    const faturaExiste = await getFaturaPorId(fatura_cartao_id)
 
-    if (!fatura) {
+    if (!faturaExiste) {
       return res.status(404).json({ error: 'Fatura não encontrada.' })
     }
 
     await garantirColunaLancamentoAjuste()
-
-    let lancamentoId = null
-
-    if (tipo === 'pagamento') {
-      lancamentoId = await criarLancamentoPagamentoFatura({
-        fatura,
-        descricao: descricao.trim(),
-        valor,
-        dataPagamento: data_ajuste,
-      })
-    }
 
     const result = await run(
       `INSERT INTO ajustes_fatura_cartao (
@@ -669,7 +888,7 @@ cartoesCreditoRoutes.post('/ajustes-fatura-cartao', async (req, res) => {
         data_ajuste,
         lancamento_id
       ) VALUES (?, ?, ?, ?, ?, ?)`,
-      [fatura_cartao_id, descricao.trim(), tipo, valor, data_ajuste, lancamentoId],
+      [fatura_cartao_id, descricao.trim(), tipo, valor, data_ajuste, null],
     )
 
     await atualizarValorFatura(fatura_cartao_id)
@@ -682,8 +901,68 @@ cartoesCreditoRoutes.post('/ajustes-fatura-cartao', async (req, res) => {
   }
 })
 
-cartoesCreditoRoutes.get('/compras-cartao', async (_req, res) => {
+cartoesCreditoRoutes.put('/ajustes-fatura-cartao/:id', async (req, res) => {
   try {
+    const { descricao, valor, data_ajuste = null } = req.body
+
+    if (!descricao?.trim() || !valor || Number(valor) <= 0) {
+      return res.status(400).json({ error: 'Informe descricao e valor maior que zero.' })
+    }
+
+    const ajuste = await get('SELECT * FROM ajustes_fatura_cartao WHERE id = ?', [req.params.id])
+
+    if (!ajuste) {
+      return res.status(404).json({ error: 'LanÃ§amento da fatura nÃ£o encontrado.' })
+    }
+
+    await run(
+      `UPDATE ajustes_fatura_cartao
+      SET descricao = ?, valor = ?, data_ajuste = ?
+      WHERE id = ?`,
+      [descricao.trim(), valor, data_ajuste, req.params.id],
+    )
+
+    await atualizarValorFatura(ajuste.fatura_cartao_id)
+
+    return res.json(await buscarAjusteCompletoPorId(req.params.id))
+  } catch (error) {
+    return res.status(500).json({ error: error.message })
+  }
+})
+
+cartoesCreditoRoutes.delete('/ajustes-fatura-cartao/:id', async (req, res) => {
+  try {
+    const ajuste = await get('SELECT * FROM ajustes_fatura_cartao WHERE id = ?', [req.params.id])
+
+    if (!ajuste) {
+      return res.status(404).json({ error: 'LanÃ§amento da fatura nÃ£o encontrado.' })
+    }
+
+    await run('BEGIN TRANSACTION')
+
+    try {
+      await run('DELETE FROM ajustes_fatura_cartao WHERE id = ?', [req.params.id])
+
+      if (ajuste.lancamento_id) {
+        await run(`DELETE FROM ${LANCAMENTOS_TABLE} WHERE id = ?`, [ajuste.lancamento_id])
+      }
+
+      await atualizarValorFatura(ajuste.fatura_cartao_id)
+      await run('COMMIT')
+    } catch (error) {
+      await run('ROLLBACK')
+      throw error
+    }
+
+    return res.json({ ok: true })
+  } catch (error) {
+    return res.status(500).json({ error: error.message })
+  }
+})
+
+cartoesCreditoRoutes.get('/compras-cartao', async (req, res) => {
+  try {
+    const incluirInativos = req.query.incluirInativos === '1'
     const rows = await all(
       `SELECT
         compras_cartao.*,
@@ -694,6 +973,8 @@ cartoesCreditoRoutes.get('/compras-cartao', async (_req, res) => {
       LEFT JOIN cartoes_credito ON cartoes_credito.id = compras_cartao.cartao_id
       LEFT JOIN categoria ON categoria.id = compras_cartao.categoria_id
       LEFT JOIN meses ON meses.id = compras_cartao.primeira_fatura_mes
+      WHERE ${incluirInativos ? '1 = 1' : 'cartoes_credito.ativo = 1'}
+        AND (${incluirInativos ? '1 = 1' : 'categoria.id IS NULL OR categoria.ativo = 1'})
       ORDER BY compras_cartao.ano_compra, compras_cartao.mes_compra, compras_cartao.dia_compra, compras_cartao.id`,
     )
 
@@ -703,23 +984,144 @@ cartoesCreditoRoutes.get('/compras-cartao', async (_req, res) => {
   }
 })
 
-cartoesCreditoRoutes.get('/parcelas-cartao', async (_req, res) => {
+cartoesCreditoRoutes.get('/parcelas-cartao', async (req, res) => {
   try {
+    const incluirInativos = req.query.incluirInativos === '1'
     const rows = await all(
       `SELECT
         parcelas_cartao.*,
         compras_cartao.descricao AS compra,
+        compras_cartao.categoria_id,
+        categoria.descricao AS categoria,
         faturas_cartao.mes_referencia,
         faturas_cartao.ano_referencia,
         cartoes_credito.descricao AS cartao
       FROM parcelas_cartao
       LEFT JOIN compras_cartao ON compras_cartao.id = parcelas_cartao.compra_cartao_id
+      LEFT JOIN categoria ON categoria.id = compras_cartao.categoria_id
       LEFT JOIN faturas_cartao ON faturas_cartao.id = parcelas_cartao.fatura_cartao_id
       LEFT JOIN cartoes_credito ON cartoes_credito.id = faturas_cartao.cartao_id
+      WHERE ${incluirInativos ? '1 = 1' : 'cartoes_credito.ativo = 1'}
+        AND (${incluirInativos ? '1 = 1' : 'categoria.id IS NULL OR categoria.ativo = 1'})
       ORDER BY faturas_cartao.ano_referencia, faturas_cartao.mes_referencia, parcelas_cartao.numero_parcela`,
     )
 
     return res.json(rows)
+  } catch (error) {
+    return res.status(500).json({ error: error.message })
+  }
+})
+
+cartoesCreditoRoutes.put('/parcelas-cartao/:id', async (req, res) => {
+  try {
+    const {
+      descricao,
+      categoria_id = null,
+      valor_parcela,
+      escopo = 'atual',
+    } = req.body
+
+    if (!valor_parcela || Number(valor_parcela) <= 0) {
+      return res.status(400).json({ error: 'Informe um valor maior que zero.' })
+    }
+
+    const parcela = await buscarParcelaCompletaPorId(req.params.id)
+
+    if (!parcela) {
+      return res.status(404).json({ error: 'Parcela nÃ£o encontrada.' })
+    }
+
+    const aplicarFuturo = escopo === 'futuro'
+    const faturasAfetadas = aplicarFuturo
+      ? await listarFaturasDaCompra(parcela.compra_cartao_id, parcela.numero_parcela)
+      : [{ fatura_cartao_id: parcela.fatura_cartao_id }]
+
+    await run('BEGIN TRANSACTION')
+
+    try {
+      if (aplicarFuturo || Number(parcela.total_parcelas) === 1) {
+        await run(
+          'UPDATE compras_cartao SET descricao = ?, categoria_id = ? WHERE id = ?',
+          [descricao?.trim() || parcela.descricao, categoria_id || null, parcela.compra_cartao_id],
+        )
+      }
+
+      if (aplicarFuturo) {
+        await run(
+          `UPDATE parcelas_cartao
+          SET valor_parcela = ?
+          WHERE compra_cartao_id = ? AND numero_parcela >= ?`,
+          [valor_parcela, parcela.compra_cartao_id, parcela.numero_parcela],
+        )
+      } else {
+        await run('UPDATE parcelas_cartao SET valor_parcela = ? WHERE id = ?', [
+          valor_parcela,
+          parcela.id,
+        ])
+      }
+
+      for (const fatura of faturasAfetadas) {
+        await atualizarValorFatura(fatura.fatura_cartao_id)
+      }
+
+      await run('COMMIT')
+    } catch (error) {
+      await run('ROLLBACK')
+      throw error
+    }
+
+    return res.json({ ok: true })
+  } catch (error) {
+    return res.status(500).json({ error: error.message })
+  }
+})
+
+cartoesCreditoRoutes.delete('/parcelas-cartao/:id', async (req, res) => {
+  try {
+    const escopo = req.query.escopo || 'atual'
+    const parcela = await buscarParcelaCompletaPorId(req.params.id)
+
+    if (!parcela) {
+      return res.status(404).json({ error: 'Parcela nÃ£o encontrada.' })
+    }
+
+    const aplicarFuturo = escopo === 'futuro'
+    const faturasAfetadas = aplicarFuturo
+      ? await listarFaturasDaCompra(parcela.compra_cartao_id, parcela.numero_parcela)
+      : [{ fatura_cartao_id: parcela.fatura_cartao_id }]
+
+    await run('BEGIN TRANSACTION')
+
+    try {
+      if (aplicarFuturo) {
+        await run(
+          'DELETE FROM parcelas_cartao WHERE compra_cartao_id = ? AND numero_parcela >= ?',
+          [parcela.compra_cartao_id, parcela.numero_parcela],
+        )
+      } else {
+        await run('DELETE FROM parcelas_cartao WHERE id = ?', [parcela.id])
+      }
+
+      const restantes = await get(
+        'SELECT COUNT(*) AS total FROM parcelas_cartao WHERE compra_cartao_id = ?',
+        [parcela.compra_cartao_id],
+      )
+
+      if (Number(restantes.total) === 0) {
+        await run('DELETE FROM compras_cartao WHERE id = ?', [parcela.compra_cartao_id])
+      }
+
+      for (const fatura of faturasAfetadas) {
+        await atualizarValorFatura(fatura.fatura_cartao_id)
+      }
+
+      await run('COMMIT')
+    } catch (error) {
+      await run('ROLLBACK')
+      throw error
+    }
+
+    return res.json({ ok: true })
   } catch (error) {
     return res.status(500).json({ error: error.message })
   }
@@ -732,6 +1134,7 @@ cartoesCreditoRoutes.post('/compras-cartao', async (req, res) => {
       descricao,
       categoria_id,
       valor_total,
+      valor_parcela,
       quantidade_parcelas = 1,
       primeira_fatura_mes,
       primeira_fatura_ano,
@@ -740,18 +1143,30 @@ cartoesCreditoRoutes.post('/compras-cartao', async (req, res) => {
       ano_compra = null,
     } = req.body
 
+    const valorParcela = Number(valor_parcela || valor_total)
+    const quantidadeParcelas = Number(quantidade_parcelas)
+    const valorTotalCompra = valorParcela * quantidadeParcelas
+
     if (
       !cartao_id ||
       !descricao?.trim() ||
-      !valor_total ||
+      !valorParcela ||
       !quantidade_parcelas ||
       !primeira_fatura_mes ||
       !primeira_fatura_ano
     ) {
       return res.status(400).json({
         error:
-          'Informe cartao_id, descricao, valor_total, quantidade_parcelas, primeira_fatura_mes e primeira_fatura_ano.',
+          'Informe cartao_id, descricao, valor_parcela, quantidade_parcelas, primeira_fatura_mes e primeira_fatura_ano.',
       })
+    }
+
+    if (Number.isNaN(valorParcela) || valorParcela <= 0) {
+      return res.status(400).json({ error: 'O valor da parcela deve ser maior que zero.' })
+    }
+
+    if (!Number.isInteger(quantidadeParcelas) || quantidadeParcelas <= 0) {
+      return res.status(400).json({ error: 'A quantidade de parcelas deve ser maior que zero.' })
     }
 
     const cartao = await get('SELECT * FROM cartoes_credito WHERE id = ?', [cartao_id])
@@ -780,8 +1195,8 @@ cartoesCreditoRoutes.post('/compras-cartao', async (req, res) => {
           cartao_id,
           descricao.trim(),
           categoria_id ?? null,
-          valor_total,
-          quantidade_parcelas,
+          valorTotalCompra,
+          quantidadeParcelas,
           primeira_fatura_mes,
           primeira_fatura_ano,
           dia_compra,
@@ -790,10 +1205,9 @@ cartoesCreditoRoutes.post('/compras-cartao', async (req, res) => {
         ],
       )
 
-      const valoresParcelas = splitValorEmParcelas(valor_total, quantidade_parcelas)
       const faturasAfetadas = new Set()
 
-      for (let index = 0; index < quantidade_parcelas; index += 1) {
+      for (let index = 0; index < quantidadeParcelas; index += 1) {
         const referencia = addMonths(primeira_fatura_mes, primeira_fatura_ano, index)
         const fatura = await buscarOuCriarFatura({
           cartao,
@@ -813,8 +1227,8 @@ cartoesCreditoRoutes.post('/compras-cartao', async (req, res) => {
             compraResult.lastID,
             fatura.id,
             index + 1,
-            quantidade_parcelas,
-            valoresParcelas[index],
+            quantidadeParcelas,
+            valorParcela,
           ],
         )
 

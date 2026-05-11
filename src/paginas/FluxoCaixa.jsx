@@ -3,6 +3,7 @@ import { AnoSelector, MesSelector, PageHeader } from '../componentes/PageHeader'
 import { fetchContas } from '../utilitarios/fetch/cadastros'
 import { fetchLancamentos } from '../utilitarios/fetch/lancamentos'
 import { formatarMoeda } from '../utilitarios/formatarMoeda'
+import { useNotificacoes } from '../componentes/notificacoesContext'
 
 function compararPeriodo(lancamento, ano, mes) {
   const anoLancamento = Number(lancamento.ano_vencimento)
@@ -67,8 +68,52 @@ function calcularSaldoAtualConta(conta, lancamentos, ano, mes) {
 
 function somarMovimentos(movimentos, tipo) {
   return movimentos
-    .filter((movimento) => movimento.tipo_lancamento === tipo)
+    .filter((movimento) => (movimento.tipo_fluxo || movimento.tipo_lancamento) === tipo)
     .reduce((total, movimento) => total + Number(movimento.valor || 0), 0)
+}
+
+function getTipoFluxoConta(conta, lancamento) {
+  if (lancamento.tipo_lancamento !== 'Transferência') {
+    return lancamento.tipo_lancamento
+  }
+
+  const contaId = Number(conta.id)
+
+  if (Number(lancamento.conta_origem_id) === contaId) {
+    return 'Despesa'
+  }
+
+  if (Number(lancamento.conta_destino_id) === contaId) {
+    return 'Receita'
+  }
+
+  return lancamento.tipo_lancamento
+}
+
+function getContaFluxoConta(conta, lancamento) {
+  if (lancamento.tipo_lancamento !== 'Transferência') {
+    return lancamento.conta
+  }
+
+  const contaId = Number(conta.id)
+
+  if (Number(lancamento.conta_origem_id) === contaId) {
+    return lancamento.conta_origem || lancamento.conta || conta.descricao
+  }
+
+  if (Number(lancamento.conta_destino_id) === contaId) {
+    return lancamento.conta_destino || conta.descricao
+  }
+
+  return lancamento.conta
+}
+
+function montarMovimentoFluxo(conta, lancamento) {
+  return {
+    ...lancamento,
+    conta_fluxo: getContaFluxoConta(conta, lancamento),
+    tipo_fluxo: getTipoFluxoConta(conta, lancamento),
+  }
 }
 
 function filtrarPagos(movimentos) {
@@ -142,12 +187,12 @@ function ContaSelect({ contas, value, onChange }) {
 }
 
 function FluxoCaixa() {
+  const { notificarErro } = useNotificacoes()
   const [lancamentos, setLancamentos] = useState([])
   const [contas, setContas] = useState([])
   const [contaSelecionada, setContaSelecionada] = useState('todas')
   const [mesSelecionado, setMesSelecionado] = useState(() => new Date().getMonth() + 1)
   const [anoSelecionado, setAnoSelecionado] = useState(() => new Date().getFullYear())
-  const [erro, setErro] = useState('')
 
   useEffect(() => {
     async function carregarFluxoCaixa() {
@@ -160,12 +205,12 @@ function FluxoCaixa() {
         setLancamentos(dadosLancamentos)
         setContas(dadosContas)
       } catch (error) {
-        setErro(error.message)
+        notificarErro(error.message)
       }
     }
 
     carregarFluxoCaixa()
-  }, [])
+  }, [notificarErro])
 
   const contasVisiveis = contas.filter(
     (conta) =>
@@ -181,6 +226,8 @@ function FluxoCaixa() {
     mesAtual,
   ) > 0
   const labelSaldoAbertura = periodoFuturo ? 'Saldo inicial previsto' : 'Saldo inicial'
+  const labelSaldoAtual = periodoFuturo ? 'Saldo final previsto' : 'Saldo atual'
+  const labelSaldoAtualGeral = periodoFuturo ? 'Saldo final previsto geral' : 'Saldo atual geral'
 
   const fluxosPorConta = contasVisiveis.map((conta) => {
     const movimentosDoMes = lancamentos
@@ -192,6 +239,7 @@ function FluxoCaixa() {
           Number(lancamento.ano_vencimento) === anoSelecionado,
       )
       .sort((a, b) => Number(a.dia_vencimento) - Number(b.dia_vencimento))
+      .map((lancamento) => montarMovimentoFluxo(conta, lancamento))
 
     const saldoAbertura = calcularSaldoAberturaConta({
       ano: anoSelecionado,
@@ -206,15 +254,18 @@ function FluxoCaixa() {
     const totalDespesasPagas = somarMovimentos(movimentosPagosDoMes, 'Despesa')
     const totalReceitasPrevistas = somarMovimentos(movimentosPendentesDoMes, 'Receita')
     const totalDespesasPrevistas = somarMovimentos(movimentosPendentesDoMes, 'Despesa')
-    const saldoRealizado = movimentosPagosDoMes.reduce(
-      (saldo, lancamento) => saldo + calcularImpactoNaConta(conta, lancamento),
-      saldoAbertura,
-    )
+    const saldoAtualCalculado = calcularSaldoAtualConta(conta, lancamentos, anoSelecionado, mesSelecionado)
+    const saldoRealizado = periodoFuturo
+      ? movimentosPagosDoMes.reduce(
+        (saldo, lancamento) => saldo + calcularImpactoNaConta(conta, lancamento),
+        saldoAbertura,
+      )
+      : saldoAtualCalculado
     const saldoPrevisto = movimentosPendentesDoMes.reduce(
       (saldo, lancamento) => saldo + calcularImpactoNaConta(conta, lancamento),
       saldoRealizado,
     )
-    const saldoAtual = calcularSaldoAtualConta(conta, lancamentos, anoSelecionado, mesSelecionado)
+    const saldoAtual = periodoFuturo ? saldoPrevisto : saldoAtualCalculado
 
     return {
       conta,
@@ -278,7 +329,7 @@ function FluxoCaixa() {
               <strong>{formatarMoeda(resumoGeral.saldoAbertura)}</strong>
             </article>
             <article className="cash-flow-card cash-flow-card--yellow">
-              <span>Saldo atual geral</span>
+              <span>{labelSaldoAtualGeral}</span>
               <strong>{formatarMoeda(resumoGeral.saldoAtual)}</strong>
             </article>
             <article className="cash-flow-card cash-flow-card--green">
@@ -294,8 +345,6 @@ function FluxoCaixa() {
               <strong>{formatarMoeda(resumoGeral.saldoPrevisto)}</strong>
             </article>
           </div>
-
-          {erro && <p>{erro}</p>}
 
           {fluxosPorConta.map((fluxo) => (
             <div className="box-grid" key={fluxo.conta.id}>
@@ -332,7 +381,7 @@ function FluxoCaixa() {
                   {fluxo.movimentos.map((movimento) => (
                     <tr
                       className={
-                        movimento.tipo_lancamento === 'Receita'
+                        movimento.tipo_fluxo === 'Receita'
                           ? 'cash-flow-row--income'
                           : 'cash-flow-row--expense'
                       }
@@ -341,8 +390,8 @@ function FluxoCaixa() {
                       <td>{formatarVencimento(movimento)}</td>
                       <td>{movimento.descricao}</td>
                       <td>{movimento.categoria}</td>
-                      <td>{movimento.conta}</td>
-                      <td>{movimento.tipo_lancamento}</td>
+                      <td>{movimento.conta_fluxo}</td>
+                      <td>{movimento.tipo_fluxo}</td>
                       <td>
                         <PagoStatus dataPagamento={movimento.data_pagamento} />
                       </td>
@@ -377,7 +426,7 @@ function FluxoCaixa() {
                     <td>{formatarMoeda(fluxo.totalDespesasPrevistas)}</td>
                   </tr>
                   <tr>
-                    <td colSpan="6">Saldo atual</td>
+                    <td colSpan="6">{labelSaldoAtual}</td>
                     <td>{formatarMoeda(fluxo.saldoAtual)}</td>
                   </tr>
                 </tfoot>

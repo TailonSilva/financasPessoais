@@ -4,25 +4,44 @@ const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 
 let apiServer
+let mainWindow
 
-function ensureDatabasePath() {
-  const userDatabasePath = path.join(app.getPath('userData'), 'db.sqlite')
+function getAppIconPath() {
+  return path.join(__dirname, '..', 'build', 'icon.ico')
+}
 
-  if (!fs.existsSync(userDatabasePath)) {
-    const bundledDatabasePath = app.isPackaged
-      ? path.join(process.resourcesPath, 'db.sqlite')
-      : path.join(__dirname, '..', 'src', 'backend', 'db.sqlite')
+function ensureRuntimePaths() {
+  const projectDatabasePath = path.join(__dirname, '..', 'src', 'backend', 'db.sqlite')
+  const projectUploadsPath = path.join(__dirname, '..', 'src', 'backend', 'uploads')
+
+  if (!app.isPackaged) {
+    process.env.DB_PATH = projectDatabasePath
+    process.env.UPLOADS_PATH = projectUploadsPath
+    return
+  }
+
+  const userDataPath = app.getPath('userData')
+  const productionDatabaseDirectory = path.join(userDataPath, 'database')
+  const productionDatabasePath = path.join(productionDatabaseDirectory, 'financas-pessoais-cliente.sqlite')
+  const productionUploadsPath = path.join(userDataPath, 'uploads')
+
+  fs.mkdirSync(productionDatabaseDirectory, { recursive: true })
+  fs.mkdirSync(productionUploadsPath, { recursive: true })
+
+  if (!fs.existsSync(productionDatabasePath)) {
+    const bundledDatabasePath = path.join(process.resourcesPath, 'db.sqlite')
 
     if (fs.existsSync(bundledDatabasePath)) {
-      fs.copyFileSync(bundledDatabasePath, userDatabasePath)
+      fs.copyFileSync(bundledDatabasePath, productionDatabasePath)
     }
   }
 
-  process.env.DB_PATH = userDatabasePath
+  process.env.DB_PATH = productionDatabasePath
+  process.env.UPLOADS_PATH = productionUploadsPath
 }
 
 async function startApiServer() {
-  ensureDatabasePath()
+  ensureRuntimePaths()
 
   const appPath = path.join(__dirname, '..', 'src', 'backend', 'app.js')
   const backend = await import(pathToFileURL(appPath).href)
@@ -42,9 +61,10 @@ async function createWindow() {
 
   Menu.setApplicationMenu(null)
 
-  const mainWindow = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     autoHideMenuBar: true,
     height: 760,
+    icon: getAppIconPath(),
     minHeight: 640,
     minWidth: 1100,
     show: false,
@@ -59,6 +79,10 @@ async function createWindow() {
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show()
+  })
+
+  mainWindow.on('closed', () => {
+    mainWindow = null
   })
 
   if (process.env.ELECTRON_START_URL) {

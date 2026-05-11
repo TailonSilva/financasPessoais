@@ -1,6 +1,39 @@
 import { useEffect, useMemo, useState } from 'react'
 import { PageHeader } from '../componentes/PageHeader'
 import { apiUrl } from '../utilitarios/fetch/api'
+import { useNotificacoes } from '../componentes/notificacoesContext'
+
+const logosBanco = [
+  {
+    label: 'Bradesco',
+    value: 'bradesco.png',
+    preview: new URL('../assets/img/bradesco.png', import.meta.url).href,
+  },
+  {
+    label: 'Mercado Pago',
+    value: 'mercado-pago.png',
+    preview: new URL('../assets/img/mercado-pago.png', import.meta.url).href,
+  },
+  {
+    label: 'Nubank',
+    value: 'nubank.png',
+    preview: new URL('../assets/img/nubank.png', import.meta.url).href,
+  },
+]
+
+function getImagemBancoUrl(valor) {
+  const logoPadrao = logosBanco.find((logo) => logo.value === valor)
+
+  if (logoPadrao) {
+    return logoPadrao.preview
+  }
+
+  if (valor?.startsWith('uploads/')) {
+    return apiUrl(`/api/${valor}`)
+  }
+
+  return ''
+}
 
 const cadastros = [
   {
@@ -13,7 +46,8 @@ const cadastros = [
       { campo: 'id', titulo: 'ID' },
       { campo: 'descricao', titulo: 'Descrição' },
       { campo: 'icone', titulo: 'Ícone' },
-      { campo: 'cor', titulo: 'Cor' },
+      { campo: 'cor', titulo: 'Cor', tipo: 'cor' },
+      { campo: 'ativo', titulo: 'Status', tipo: 'status' },
     ],
     campos: [
       { nome: 'descricao', label: 'Descrição', required: true },
@@ -42,6 +76,7 @@ const cadastros = [
       { campo: 'tipo_conta', titulo: 'Tipo' },
       { campo: 'banco', titulo: 'Banco' },
       { campo: 'saldoInicial', titulo: 'Saldo inicial', tipo: 'moeda' },
+      { campo: 'ativo', titulo: 'Status', tipo: 'status' },
     ],
     campos: [
       { nome: 'descricao', label: 'Descrição', required: true },
@@ -77,6 +112,7 @@ const cadastros = [
       { campo: 'limite', titulo: 'Limite', tipo: 'moeda' },
       { campo: 'dia_fechamento', titulo: 'Fechamento' },
       { campo: 'dia_vencimento', titulo: 'Vencimento' },
+      { campo: 'ativo', titulo: 'Status', tipo: 'status' },
     ],
     campos: [
       { nome: 'descricao', label: 'Descrição', required: true },
@@ -104,11 +140,14 @@ const cadastros = [
     colunas: [
       { campo: 'id', titulo: 'ID' },
       { campo: 'nome', titulo: 'Nome' },
-      { campo: 'imagem', titulo: 'Imagem' },
+      { campo: 'imagem', titulo: 'Logo', tipo: 'logo' },
+      { campo: 'cor', titulo: 'Cor', tipo: 'cor' },
+      { campo: 'ativo', titulo: 'Status', tipo: 'status' },
     ],
     campos: [
       { nome: 'nome', label: 'Nome', required: true },
-      { nome: 'imagem', label: 'Imagem' },
+      { nome: 'imagem', label: 'Logo', tipo: 'logo-upload', required: true },
+      { nome: 'cor', label: 'Cor', tipo: 'color', valorInicial: '#1e96f2' },
     ],
     variante: 'yellow',
     icone: (
@@ -132,6 +171,7 @@ const cadastros = [
     colunas: [
       { campo: 'id', titulo: 'ID' },
       { campo: 'descricao', titulo: 'Descrição' },
+      { campo: 'ativo', titulo: 'Status', tipo: 'status' },
     ],
     campos: [{ nome: 'descricao', label: 'Descrição', required: true }],
     variante: 'red',
@@ -152,6 +192,11 @@ const endpointsDependencias = {
   tiposConta: '/api/tipos-conta',
 }
 
+function endpointConfiguracao(endpoint) {
+  const separador = endpoint.includes('?') ? '&' : '?'
+  return `${endpoint}${separador}incluirInativos=1`
+}
+
 function formatarValor(valor, tipo) {
   if (valor === null || valor === undefined || valor === '') {
     return '-'
@@ -167,6 +212,55 @@ function formatarValor(valor, tipo) {
   return valor
 }
 
+function getLogoBanco(nomeArquivo) {
+  return logosBanco.find((logo) => logo.value === nomeArquivo)
+}
+
+function renderValorGrid(registro, coluna) {
+  const valor = registro[coluna.campo]
+
+  if (coluna.tipo === 'logo') {
+    const logo = getLogoBanco(valor)
+    const imagemUrl = getImagemBancoUrl(valor)
+
+    if (!imagemUrl) {
+      return formatarValor(valor)
+    }
+
+    return (
+      <span className="settings-logo-cell">
+        <img src={imagemUrl} alt="" />
+        {logo?.label || 'Logo enviada'}
+      </span>
+    )
+  }
+
+  if (coluna.tipo === 'cor') {
+    if (!valor) {
+      return '-'
+    }
+
+    return (
+      <span className="settings-color-cell">
+        <span style={{ backgroundColor: valor }} />
+        {valor}
+      </span>
+    )
+  }
+
+  if (coluna.tipo === 'status') {
+    const ativo = valor !== 0
+
+    return (
+      <span className={`settings-status settings-status--${ativo ? 'active' : 'inactive'}`}>
+        {ativo ? 'Ativo' : 'Inativo'}
+      </span>
+    )
+  }
+
+  return formatarValor(valor, coluna.tipo)
+}
+
 function getValorInicial(cadastro) {
   return cadastro.campos.reduce((valores, campo) => {
     valores[campo.nome] = campo.valorInicial ?? ''
@@ -179,17 +273,22 @@ function getOpcaoLabel(opcao) {
 }
 
 function Configuracao() {
+  const { notificarErro } = useNotificacoes()
   const [cadastroAberto, setCadastroAberto] = useState(null)
   const [formularioAberto, setFormularioAberto] = useState(false)
   const [registros, setRegistros] = useState([])
   const [opcoes, setOpcoes] = useState({})
   const [formulario, setFormulario] = useState({})
+  const [registroEditando, setRegistroEditando] = useState(null)
   const [carregando, setCarregando] = useState(false)
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
-  const [erroFormulario, setErroFormulario] = useState('')
+  const [imagemTratamento, setImagemTratamento] = useState(null)
 
-  const tituloFormulario = useMemo(() => cadastroAberto?.acao || 'Novo registro', [cadastroAberto])
+  const tituloFormulario = useMemo(
+    () => (registroEditando ? `Editar ${cadastroAberto?.titulo}` : cadastroAberto?.acao || 'Novo registro'),
+    [cadastroAberto, registroEditando],
+  )
 
   useEffect(() => {
     if (!cadastroAberto) {
@@ -219,7 +318,7 @@ function Configuracao() {
     setCarregando(true)
 
     try {
-      const resposta = await fetch(apiUrl(cadastro.endpoint))
+      const resposta = await fetch(apiUrl(endpointConfiguracao(cadastro.endpoint)))
 
       if (!resposta.ok) {
         throw new Error('Não foi possível carregar os dados.')
@@ -228,7 +327,8 @@ function Configuracao() {
       const dados = await resposta.json()
       setRegistros(Array.isArray(dados) ? dados : [])
     } catch (error) {
-      setErro(error.message)
+      setErro('erro')
+      notificarErro(error.message)
     } finally {
       setCarregando(false)
     }
@@ -237,6 +337,7 @@ function Configuracao() {
   async function abrirCadastro(cadastro) {
     setCadastroAberto(cadastro)
     setFormularioAberto(false)
+    setRegistroEditando(null)
     setRegistros([])
     setFormulario({})
     await carregarRegistros(cadastro)
@@ -244,14 +345,13 @@ function Configuracao() {
 
   async function carregarDependencias(cadastro) {
     const dependencias = cadastro.dependencias || []
-    const pendentes = dependencias.filter((dependencia) => !opcoes[dependencia])
 
-    if (pendentes.length === 0) {
+    if (dependencias.length === 0) {
       return
     }
 
     const resultados = await Promise.all(
-      pendentes.map(async (dependencia) => {
+      dependencias.map(async (dependencia) => {
         const resposta = await fetch(apiUrl(endpointsDependencias[dependencia]))
 
         if (!resposta.ok) {
@@ -269,14 +369,32 @@ function Configuracao() {
   }
 
   async function incluirRegistro() {
-    setErroFormulario('')
-
     try {
       await carregarDependencias(cadastroAberto)
+      setRegistroEditando(null)
       setFormulario(getValorInicial(cadastroAberto))
       setFormularioAberto(true)
     } catch (error) {
-      setErroFormulario(error.message)
+      notificarErro(error.message)
+    }
+  }
+
+  async function editarRegistro(registro) {
+    try {
+      await carregarDependencias(cadastroAberto)
+      setRegistroEditando(registro)
+      setFormulario(
+        cadastroAberto.campos.reduce((valores, campo) => {
+          valores[campo.nome] =
+            campo.tipo === 'checkbox'
+              ? registro[campo.nome] !== 0
+              : registro[campo.nome] ?? campo.valorInicial ?? ''
+          return valores
+        }, {}),
+      )
+      setFormularioAberto(true)
+    } catch (error) {
+      notificarErro(error.message)
     }
   }
 
@@ -285,6 +403,85 @@ function Configuracao() {
       ...valoresAtuais,
       [nome]: valor,
     }))
+  }
+
+  function escolherImagem(event, campo) {
+    const arquivo = event.target.files?.[0]
+    event.target.value = ''
+
+    if (!arquivo) {
+      return
+    }
+
+    if (!arquivo.type.startsWith('image/')) {
+      notificarErro('Escolha um arquivo de imagem válido.')
+      return
+    }
+
+    const leitor = new FileReader()
+
+    leitor.onload = () => {
+      setImagemTratamento({
+        campoNome: campo.nome,
+        nomeArquivo: arquivo.name,
+        offsetX: 0,
+        offsetY: 0,
+        src: leitor.result,
+        zoom: 1,
+      })
+    }
+
+    leitor.readAsDataURL(arquivo)
+  }
+
+  function alterarImagemTratamento(campo, valor) {
+    setImagemTratamento((imagemAtual) => ({
+      ...imagemAtual,
+      [campo]: Number(valor),
+    }))
+  }
+
+  function gerarImagemTratada() {
+    return new Promise((resolve, reject) => {
+      const imagem = new Image()
+
+      imagem.onload = () => {
+        const larguraCanvas = 480
+        const alturaCanvas = 300
+        const canvas = document.createElement('canvas')
+        const contexto = canvas.getContext('2d')
+        const escalaBase = Math.min(larguraCanvas / imagem.width, alturaCanvas / imagem.height)
+        const escala = escalaBase * imagemTratamento.zoom
+        const largura = imagem.width * escala
+        const altura = imagem.height * escala
+        const x = (larguraCanvas - largura) / 2 + (imagemTratamento.offsetX / 100) * 120
+        const y = (alturaCanvas - altura) / 2 + (imagemTratamento.offsetY / 100) * 75
+
+        canvas.width = larguraCanvas
+        canvas.height = alturaCanvas
+        contexto.clearRect(0, 0, larguraCanvas, alturaCanvas)
+        contexto.drawImage(imagem, x, y, largura, altura)
+        resolve(canvas.toDataURL('image/png'))
+      }
+
+      imagem.onerror = () => reject(new Error('Não foi possível tratar a imagem.'))
+      imagem.src = imagemTratamento.src
+    })
+  }
+
+  async function aplicarImagemTratada() {
+    try {
+      const imagemFinal = await gerarImagemTratada()
+
+      setFormulario((valoresAtuais) => ({
+        ...valoresAtuais,
+        [imagemTratamento.campoNome]: imagemFinal,
+        [`${imagemTratamento.campoNome}_arquivo`]: imagemTratamento.nomeArquivo,
+      }))
+      setImagemTratamento(null)
+    } catch (error) {
+      notificarErro(error.message)
+    }
   }
 
   function montarPayload() {
@@ -306,18 +503,50 @@ function Configuracao() {
     }, {})
   }
 
+  async function enviarLogoBancoSePreciso(payload) {
+    if (cadastroAberto.id !== 'bancos' || !payload.imagem?.startsWith('data:image/')) {
+      return payload
+    }
+
+    const resposta = await fetch(apiUrl('/api/uploads/bancos'), {
+      body: JSON.stringify({
+        imagemBase64: payload.imagem,
+        nomeArquivo: formulario.imagem_arquivo,
+      }),
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      method: 'POST',
+    })
+
+    if (!resposta.ok) {
+      const erroResposta = await resposta.json().catch(() => ({}))
+      throw new Error(erroResposta.error || 'Não foi possível enviar a logo do banco.')
+    }
+
+    const dados = await resposta.json()
+
+    return {
+      ...payload,
+      imagem: dados.arquivo,
+    }
+  }
+
   async function salvarRegistro(event) {
     event.preventDefault()
-    setErroFormulario('')
     setSalvando(true)
 
     try {
-      const resposta = await fetch(apiUrl(cadastroAberto.endpoint), {
-        body: JSON.stringify(montarPayload()),
+      const payload = await enviarLogoBancoSePreciso(montarPayload())
+      const url = registroEditando
+        ? `${cadastroAberto.endpoint}/${registroEditando.id}`
+        : cadastroAberto.endpoint
+      const resposta = await fetch(apiUrl(url), {
+        body: JSON.stringify(payload),
         headers: {
           'Content-Type': 'application/json',
         },
-        method: 'POST',
+        method: registroEditando ? 'PUT' : 'POST',
       })
 
       if (!resposta.ok) {
@@ -326,11 +555,35 @@ function Configuracao() {
       }
 
       setFormularioAberto(false)
+      setRegistroEditando(null)
       await carregarRegistros(cadastroAberto)
     } catch (error) {
-      setErroFormulario(error.message)
+      notificarErro(error.message)
     } finally {
       setSalvando(false)
+    }
+  }
+
+  async function alternarStatusRegistro(registro) {
+    const proximoAtivo = registro.ativo === 0 ? 1 : 0
+
+    try {
+      const resposta = await fetch(apiUrl(`${cadastroAberto.endpoint}/${registro.id}/ativo`), {
+        body: JSON.stringify({ ativo: proximoAtivo }),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        method: 'PATCH',
+      })
+
+      if (!resposta.ok) {
+        const erroResposta = await resposta.json().catch(() => ({}))
+        throw new Error(erroResposta.error || 'Não foi possível alterar o status.')
+      }
+
+      await carregarRegistros(cadastroAberto)
+    } catch (error) {
+      notificarErro(error.message)
     }
   }
 
@@ -350,10 +603,61 @@ function Configuracao() {
           <option value="">Selecione</option>
           {itens.map((item) => (
             <option key={item.id} value={item.id}>
-              {getOpcaoLabel(item)}
+              {getOpcaoLabel(item)}{item.ativo === 0 ? ' (inativo)' : ''}
             </option>
           ))}
         </select>
+      )
+    }
+
+    if (campo.tipo === 'logo-select') {
+      return (
+        <div className="settings-logo-options">
+          {campo.opcoes.map((logo) => (
+            <label
+              className={`settings-logo-option ${
+                valor === logo.value ? 'settings-logo-option--selected' : ''
+              }`}
+              key={logo.value}
+            >
+              <input
+                checked={valor === logo.value}
+                name={campo.nome}
+                onChange={() => alterarCampo(campo.nome, logo.value)}
+                required={campo.required}
+                type="radio"
+                value={logo.value}
+              />
+              <img src={logo.preview} alt="" />
+              <span>{logo.label}</span>
+            </label>
+          ))}
+        </div>
+      )
+    }
+
+    if (campo.tipo === 'logo-upload') {
+      const preview = valor?.startsWith('data:image/') ? valor : getImagemBancoUrl(valor)
+
+      return (
+        <div className="settings-upload-logo">
+          <label className="settings-upload-logo__button">
+            <input
+              accept="image/*"
+              onChange={(event) => escolherImagem(event, campo)}
+              type="file"
+            />
+            Carregar imagem
+          </label>
+
+          {preview ? (
+            <div className="settings-upload-logo__preview">
+              <img src={preview} alt="" />
+            </div>
+          ) : (
+            <div className="settings-upload-logo__empty">Nenhuma logo selecionada.</div>
+          )}
+        </div>
       )
     }
 
@@ -460,8 +764,6 @@ function Configuracao() {
               </div>
             </header>
 
-            {erroFormulario && <p className="settings-modal__message">{erroFormulario}</p>}
-            {erro && <p className="settings-modal__message">{erro}</p>}
             {carregando && <p className="settings-modal__message">Carregando...</p>}
 
             {!carregando && !erro && (
@@ -472,6 +774,7 @@ function Configuracao() {
                       {cadastroAberto.colunas.map((coluna) => (
                         <th key={coluna.campo}>{coluna.titulo}</th>
                       ))}
+                      <th>Ações</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -479,14 +782,24 @@ function Configuracao() {
                       <tr key={registro.id}>
                         {cadastroAberto.colunas.map((coluna) => (
                           <td key={coluna.campo}>
-                            {formatarValor(registro[coluna.campo], coluna.tipo)}
+                            {renderValorGrid(registro, coluna)}
                           </td>
                         ))}
+                        <td>
+                          <div className="settings-grid-actions">
+                            <button type="button" onClick={() => editarRegistro(registro)}>
+                              Editar
+                            </button>
+                            <button type="button" onClick={() => alternarStatusRegistro(registro)}>
+                              {registro.ativo === 0 ? 'Ativar' : 'Inativar'}
+                            </button>
+                          </div>
+                        </td>
                       </tr>
                     ))}
                     {registros.length === 0 && (
                       <tr>
-                        <td colSpan={cadastroAberto.colunas.length}>
+                        <td colSpan={cadastroAberto.colunas.length + 1}>
                           Nenhum registro encontrado.
                         </td>
                       </tr>
@@ -536,8 +849,6 @@ function Configuracao() {
                   </div>
                 ))}
 
-                {erroFormulario && <p className="settings-form__error">{erroFormulario}</p>}
-
                 <div className="settings-form__actions">
                   <button type="button" onClick={() => setFormularioAberto(false)}>
                     Cancelar
@@ -547,6 +858,87 @@ function Configuracao() {
                   </button>
                 </div>
               </form>
+            </section>
+          )}
+
+          {imagemTratamento && (
+            <section
+              className="settings-image-editor"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="settings-image-editor-title"
+              onMouseDown={(event) => event.stopPropagation()}
+            >
+              <header className="settings-form-modal__header">
+                <h2 id="settings-image-editor-title">Tratar imagem</h2>
+                <button
+                  className="settings-modal__close"
+                  type="button"
+                  onClick={() => setImagemTratamento(null)}
+                  aria-label="Fechar tratamento"
+                  title="Fechar"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M6 6l12 12" />
+                    <path d="M18 6 6 18" />
+                  </svg>
+                </button>
+              </header>
+
+              <div className="settings-image-editor__canvas">
+                <img
+                  src={imagemTratamento.src}
+                  alt=""
+                  style={{
+                    transform: `translate(${imagemTratamento.offsetX}px, ${imagemTratamento.offsetY}px) scale(${imagemTratamento.zoom})`,
+                  }}
+                />
+              </div>
+
+              <div className="settings-image-editor__controls">
+                <label>
+                  Zoom
+                  <input
+                    min="0.5"
+                    max="3"
+                    onChange={(event) => alterarImagemTratamento('zoom', event.target.value)}
+                    step="0.05"
+                    type="range"
+                    value={imagemTratamento.zoom}
+                  />
+                </label>
+                <label>
+                  Horizontal
+                  <input
+                    min="-100"
+                    max="100"
+                    onChange={(event) => alterarImagemTratamento('offsetX', event.target.value)}
+                    step="1"
+                    type="range"
+                    value={imagemTratamento.offsetX}
+                  />
+                </label>
+                <label>
+                  Vertical
+                  <input
+                    min="-100"
+                    max="100"
+                    onChange={(event) => alterarImagemTratamento('offsetY', event.target.value)}
+                    step="1"
+                    type="range"
+                    value={imagemTratamento.offsetY}
+                  />
+                </label>
+              </div>
+
+              <div className="settings-form__actions">
+                <button type="button" onClick={() => setImagemTratamento(null)}>
+                  Cancelar
+                </button>
+                <button className="settings-modal__include" type="button" onClick={aplicarImagemTratada}>
+                  Aplicar
+                </button>
+              </div>
             </section>
           )}
         </div>
