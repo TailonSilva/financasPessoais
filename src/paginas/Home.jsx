@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { AnoSelector, MesSelector, PageHeader } from '../componentes/PageHeader'
 import { fetchCategorias, fetchContas } from '../utilitarios/fetch/cadastros'
-import { fetchFaturasCartao, fetchParcelasCartao } from '../utilitarios/fetch/faturasCartao'
+import { fetchParcelasCartao } from '../utilitarios/fetch/faturasCartao'
 import { fetchLancamentos } from '../utilitarios/fetch/lancamentos'
 import { formatarMoeda } from '../utilitarios/formatarMoeda'
 import { useNotificacoes } from '../componentes/notificacoesContext'
@@ -19,6 +19,19 @@ const mesesResumo = [
   'Out',
   'Nov',
   'Dez',
+]
+
+const coresGraficoCategorias = [
+  '#1e96f2',
+  '#18a661',
+  '#e54b3f',
+  '#f7b801',
+  '#3478dd',
+  '#8a5cf6',
+  '#00a6a6',
+  '#ef7b45',
+  '#5b677a',
+  '#d95f9f',
 ]
 
 function somarLancamentos(lancamentos, tipo) {
@@ -205,6 +218,7 @@ function montarRankingDespesasMensal(categorias, lancamentos, parcelasCartao, an
     if (!rankingPorCategoria.has(chave)) {
       rankingPorCategoria.set(chave, {
         categoria: nome,
+        cor: categoria?.cor || null,
         realizado: 0,
       })
     }
@@ -291,6 +305,24 @@ function compararPorData(a, b) {
 
 function formatarDataCurta({ dia, mes }) {
   return `${String(dia).padStart(2, '0')}/${String(mes).padStart(2, '0')}`
+}
+
+function formatarDataCompleta({ dia, mes, ano }) {
+  return `${formatarDataCurta({ dia, mes })}/${ano}`
+}
+
+function normalizarTexto(texto) {
+  if (typeof texto !== 'string' || !/[ÃÂ]/.test(texto)) {
+    return texto
+  }
+
+  try {
+    const bytes = Uint8Array.from(texto, (caractere) => caractere.charCodeAt(0))
+
+    return new TextDecoder('utf-8').decode(bytes)
+  } catch {
+    return texto
+  }
 }
 
 function calcularImpactoNaConta(conta, lancamento) {
@@ -495,37 +527,6 @@ function montarVariacaoCategorias(resumoCategorias, mes) {
     .slice(0, 5)
 }
 
-function montarFaturasProximas(faturas, ano, mes) {
-  return faturas
-    .filter(
-      (fatura) =>
-        Number(fatura.valor_aberto ?? fatura.valor_total) > 0 &&
-        compararPorData(
-          {
-            ano: Number(fatura.ano_vencimento),
-            mes: Number(fatura.mes_vencimento),
-            dia: Number(fatura.dia_vencimento),
-          },
-          { ano, mes, dia: 1 },
-        ) >= 0,
-    )
-    .sort((a, b) =>
-      compararPorData(
-        {
-          ano: Number(a.ano_vencimento),
-          mes: Number(a.mes_vencimento),
-          dia: Number(a.dia_vencimento),
-        },
-        {
-          ano: Number(b.ano_vencimento),
-          mes: Number(b.mes_vencimento),
-          dia: Number(b.dia_vencimento),
-        },
-      ),
-    )
-    .slice(0, 5)
-}
-
 function montarDespesasFixasVariaveis(categorias, lancamentos, parcelasCartao, ano, mes) {
   const categoriasPorId = new Map(categorias.map((categoria) => [Number(categoria.id), categoria]))
   const totalFixas = lancamentos
@@ -593,15 +594,197 @@ function montarInvestimentos(lancamentos, ano, mes) {
   }
 }
 
+function montarFatiasPizzaCategorias(itens) {
+  let acumulado = 0
+
+  return itens.map((item, index) => {
+    const inicio = acumulado
+    const fim = acumulado + item.percentualRealizado
+
+    acumulado = fim
+
+    return {
+      ...item,
+      cor: item.cor || coresGraficoCategorias[index % coresGraficoCategorias.length],
+      fim,
+      inicio,
+    }
+  })
+}
+
+function montarCategoriasDisponiveis(categorias, lancamentos, parcelasCartao, ano, mes, contasInvestimentoIds) {
+  const categoriasComMovimento = new Set()
+
+  lancamentos
+    .filter(
+      (lancamento) =>
+        Number(lancamento.ano_vencimento) === ano &&
+        Number(lancamento.mes_vencimento) === mes &&
+        !isLancamentoEmContaInvestimento(lancamento, contasInvestimentoIds),
+    )
+    .forEach((lancamento) => {
+      if (lancamento.categoria_id) {
+        categoriasComMovimento.add(Number(lancamento.categoria_id))
+      }
+    })
+
+  parcelasCartao
+    .filter(
+      (parcela) =>
+        Number(parcela.ano_referencia) === ano &&
+        Number(parcela.mes_referencia) === mes,
+    )
+    .forEach((parcela) => {
+      if (parcela.categoria_id) {
+        categoriasComMovimento.add(Number(parcela.categoria_id))
+      }
+    })
+
+  return categorias
+    .filter((categoria) => categoriasComMovimento.has(Number(categoria.id)))
+    .sort((categoriaA, categoriaB) =>
+      categoriaA.descricao.localeCompare(categoriaB.descricao, 'pt-BR'),
+    )
+}
+
+function montarLancamentosPorCategoria(lancamentos, parcelasCartao, categoriaId, ano, mes, contasInvestimentoIds) {
+  if (!categoriaId) {
+    return []
+  }
+
+  const categoriaSelecionadaId = Number(categoriaId)
+  const lancamentosConta = lancamentos
+    .filter(
+      (lancamento) =>
+        Number(lancamento.categoria_id) === categoriaSelecionadaId &&
+        Number(lancamento.ano_vencimento) === ano &&
+        Number(lancamento.mes_vencimento) === mes &&
+        !isLancamentoEmContaInvestimento(lancamento, contasInvestimentoIds),
+    )
+    .map((lancamento) => {
+      const detalhe =
+        lancamento.tipo_lancamento === 'Transferência'
+          ? `${lancamento.conta_origem || 'Origem'} -> ${lancamento.conta_destino || 'Destino'}`
+          : lancamento.conta || 'Conta n\u00e3o informada'
+
+      return {
+        id: `conta-${lancamento.id}`,
+        data: {
+          ano: lancamento.ano_vencimento,
+          dia: lancamento.dia_vencimento,
+          mes: lancamento.mes_vencimento,
+        },
+        descricao: lancamento.descricao,
+        detalhe,
+        origem: 'Conta',
+        status: lancamento.data_pagamento ? 'Realizado' : 'Pendente',
+        tipo: lancamento.tipo_lancamento,
+        valor: Number(lancamento.valor || 0),
+      }
+    })
+
+  const lancamentosCartao = parcelasCartao
+    .filter(
+      (parcela) =>
+        Number(parcela.categoria_id) === categoriaSelecionadaId &&
+        Number(parcela.ano_referencia) === ano &&
+        Number(parcela.mes_referencia) === mes,
+    )
+    .map((parcela) => ({
+      id: `cartao-${parcela.id}`,
+      data: {
+        ano: parcela.ano_referencia,
+        dia: 1,
+        mes: parcela.mes_referencia,
+      },
+      descricao: parcela.compra || 'Compra no cart\u00e3o',
+      detalhe: `${parcela.cartao || 'Cart\u00e3o'} - parcela ${parcela.numero_parcela}/${parcela.total_parcelas}`,
+      origem: 'Cart\u00e3o',
+      status: 'Na fatura',
+      tipo: 'Despesa',
+      valor: Number(parcela.valor_parcela || 0),
+    }))
+
+  return [...lancamentosConta, ...lancamentosCartao].sort((itemA, itemB) =>
+    compararPorData(itemA.data, itemB.data),
+  )
+}
+
+function CategoriaSelector({ categorias, value, onChange }) {
+  const categoriaSelecionadaIndex = categorias.findIndex(
+    (categoria) => Number(categoria.id) === Number(value),
+  )
+  const categoriaSelecionada = categorias[categoriaSelecionadaIndex]
+  const estaDesabilitado = categorias.length === 0
+
+  function atualizarCategoria(proximoIndex) {
+    const proximaCategoria = categorias[proximoIndex]
+
+    if (proximaCategoria) {
+      onChange(Number(proximaCategoria.id))
+    }
+  }
+
+  function selecionarCategoriaAnterior() {
+    if (estaDesabilitado) {
+      return
+    }
+
+    atualizarCategoria(categoriaSelecionadaIndex <= 0 ? categorias.length - 1 : categoriaSelecionadaIndex - 1)
+  }
+
+  function selecionarProximaCategoria() {
+    if (estaDesabilitado) {
+      return
+    }
+
+    atualizarCategoria(categoriaSelecionadaIndex >= categorias.length - 1 ? 0 : categoriaSelecionadaIndex + 1)
+  }
+
+  return (
+    <div className="period-select category-filter" aria-label="Selecionar categoria">
+      <button
+        className="period-select__button"
+        type="button"
+        onClick={selecionarCategoriaAnterior}
+        disabled={estaDesabilitado}
+        aria-label="Categoria anterior"
+        title="Categoria anterior"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="m15 18-6-6 6-6" />
+        </svg>
+      </button>
+
+      <span className="period-select__value">
+        {normalizarTexto(categoriaSelecionada?.descricao) || 'Sem categoria'}
+      </span>
+
+      <button
+        className="period-select__button"
+        type="button"
+        onClick={selecionarProximaCategoria}
+        disabled={estaDesabilitado}
+        aria-label="Pr\u00f3xima categoria"
+        title="Pr\u00f3xima categoria"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="m9 18 6-6-6-6" />
+        </svg>
+      </button>
+    </div>
+  )
+}
+
 function Home() {
   const { notificarErro } = useNotificacoes()
   const [contas, setContas] = useState([])
   const [categorias, setCategorias] = useState([])
-  const [faturasCartao, setFaturasCartao] = useState([])
   const [lancamentos, setLancamentos] = useState([])
   const [parcelasCartao, setParcelasCartao] = useState([])
   const [mesSelecionado, setMesSelecionado] = useState(() => new Date().getMonth() + 1)
   const [anoSelecionado, setAnoSelecionado] = useState(() => new Date().getFullYear())
+  const [categoriaSelecionadaIdPreferida, setCategoriaSelecionadaIdPreferida] = useState(null)
 
   useEffect(() => {
     async function carregarDashboard() {
@@ -611,18 +794,15 @@ function Home() {
           dadosCategorias,
           dadosLancamentos,
           dadosParcelasCartao,
-          dadosFaturasCartao,
         ] = await Promise.all([
           fetchContas(),
           fetchCategorias(),
           fetchLancamentos(),
           fetchParcelasCartao(),
-          fetchFaturasCartao(),
         ])
 
         setContas(dadosContas)
         setCategorias(dadosCategorias)
-        setFaturasCartao(dadosFaturasCartao)
         setLancamentos(dadosLancamentos)
         setParcelasCartao(dadosParcelasCartao)
       } catch (error) {
@@ -658,6 +838,31 @@ function Home() {
       ),
     [contasInvestimentoIds, lancamentosDoMes],
   )
+  const categoriasDisponiveis = useMemo(
+    () =>
+      montarCategoriasDisponiveis(
+        categorias,
+        lancamentos,
+        parcelasCartao,
+        anoSelecionado,
+        mesSelecionado,
+        contasInvestimentoIds,
+      ),
+    [anoSelecionado, categorias, contasInvestimentoIds, lancamentos, mesSelecionado, parcelasCartao],
+  )
+  const categoriaSelecionadaId = useMemo(() => {
+    if (categoriasDisponiveis.length === 0) {
+      return null
+    }
+
+    const categoriaPreferidaExiste = categoriasDisponiveis.some(
+      (categoria) => Number(categoria.id) === Number(categoriaSelecionadaIdPreferida),
+    )
+
+    return categoriaPreferidaExiste
+      ? Number(categoriaSelecionadaIdPreferida)
+      : Number(categoriasDisponiveis[0].id)
+  }, [categoriaSelecionadaIdPreferida, categoriasDisponiveis])
 
   const contasComSaldo = useMemo(
     () =>
@@ -727,6 +932,15 @@ function Home() {
     ),
     [anoSelecionado, categorias, lancamentos, mesSelecionado, parcelasCartao],
   )
+  const fatiasDespesasMensal = useMemo(
+    () => montarFatiasPizzaCategorias(rankingDespesasMensal.itens),
+    [rankingDespesasMensal],
+  )
+  const graficoPizzaCategorias = fatiasDespesasMensal.length
+    ? `conic-gradient(${fatiasDespesasMensal
+      .map((item) => `${item.cor} ${item.inicio}% ${item.fim}%`)
+      .join(', ')})`
+    : undefined
   const pendenciasMes = useMemo(
     () => montarPendenciasMes(
       lancamentos,
@@ -750,10 +964,6 @@ function Home() {
     () => montarVariacaoCategorias(resumoDespesasPorCategoria, mesSelecionado),
     [mesSelecionado, resumoDespesasPorCategoria],
   )
-  const faturasProximas = useMemo(
-    () => montarFaturasProximas(faturasCartao, anoSelecionado, mesSelecionado),
-    [anoSelecionado, faturasCartao, mesSelecionado],
-  )
   const despesasFixasVariaveis = useMemo(
     () => montarDespesasFixasVariaveis(
       categorias,
@@ -769,6 +979,33 @@ function Home() {
   const investimentos = useMemo(
     () => montarInvestimentos(lancamentos, anoSelecionado, mesSelecionado),
     [anoSelecionado, lancamentos, mesSelecionado],
+  )
+  const lancamentosCategoriaSelecionada = useMemo(
+    () =>
+      montarLancamentosPorCategoria(
+        lancamentos,
+        parcelasCartao,
+        categoriaSelecionadaId,
+        anoSelecionado,
+        mesSelecionado,
+        contasInvestimentoIds,
+      ),
+    [
+      anoSelecionado,
+      categoriaSelecionadaId,
+      contasInvestimentoIds,
+      lancamentos,
+      mesSelecionado,
+      parcelasCartao,
+    ],
+  )
+  const totalCategoriaSelecionada = useMemo(
+    () =>
+      lancamentosCategoriaSelecionada.reduce(
+        (total, lancamento) => total + Number(lancamento.valor || 0),
+        0,
+      ),
+    [lancamentosCategoriaSelecionada],
   )
   const totalDespesasMes = despesasFixasVariaveis.fixas + despesasFixasVariaveis.variaveis
   const percentualComprometimento =
@@ -988,31 +1225,50 @@ function Home() {
             <section className="dashboard-panel">
               <div className="dashboard-section-header">
                 <div>
-                  <h2>Faturas próximas</h2>
-                  <span>Cartões com valor em aberto.</span>
+                  <h2>Despesas por categoria</h2>
+                  <span>{'Realizado no m\u00eas filtrado.'}</span>
                 </div>
               </div>
 
-              <div className="invoice-summary-list">
-                {faturasProximas.map((fatura) => (
-                  <div
-                    className="invoice-summary-list__row"
-                    key={fatura.id}
-                    title="Valor exibido = valor em aberto da fatura. Quando a fatura e parcialmente paga, mostra apenas o restante."
-                  >
-                    <div>
-                      <strong>{fatura.cartao}</strong>
-                      <span>{fatura.status} • vence em {formatarDataCurta({
-                        dia: fatura.dia_vencimento,
-                        mes: fatura.mes_vencimento,
-                      })}</span>
+              <div className="expense-ranking">
+                <div className="expense-ranking__totals">
+                  <span>Realizado: {formatarMoeda(rankingDespesasMensal.totalRealizado)}</span>
+                </div>
+
+                <div className="expense-pie-chart expense-pie-chart--panel">
+                  {fatiasDespesasMensal.length > 0 && (
+                    <div
+                      className="expense-pie-chart__graphic"
+                      style={{ background: graficoPizzaCategorias }}
+                      role="img"
+                      aria-label="Distribuicao das despesas por categoria"
+                    >
+                      <div>
+                        <span>Total</span>
+                        <strong>{formatarMoeda(rankingDespesasMensal.totalRealizado)}</strong>
+                      </div>
                     </div>
-                    <strong>{formatarMoeda(fatura.valor_aberto ?? fatura.valor_total)}</strong>
+                  )}
+
+                  <div className="expense-pie-chart__legend">
+                    {fatiasDespesasMensal.map((item) => (
+                      <div className="expense-pie-chart__legend-row" key={item.categoria}>
+                        <span
+                          className="expense-pie-chart__swatch"
+                          style={{ backgroundColor: item.cor }}
+                          aria-hidden="true"
+                        />
+                        <span className="expense-pie-chart__label">{item.categoria}</span>
+                        <strong>{item.percentualRealizado.toFixed(1)}%</strong>
+                        <span className="expense-pie-chart__value">{formatarMoeda(item.realizado)}</span>
+                      </div>
+                    ))}
                   </div>
-                ))}
-                {faturasProximas.length === 0 && (
-                  <p className="dashboard-empty">Nenhuma fatura em aberto encontrada.</p>
-                )}
+
+                  {rankingDespesasMensal.itens.length === 0 && (
+                    <p className="dashboard-empty">{'Nenhuma despesa encontrada no mês.'}</p>
+                  )}
+                </div>
               </div>
             </section>
 
@@ -1139,34 +1395,52 @@ function Home() {
           <div className="box-grid">
             <div className="dashboard-section-header">
               <div>
-                <h2>Despesas por categoria</h2>
-                <span>Realizado no mês filtrado.</span>
+                <h2>{'Lan\u00e7amentos por categoria'}</h2>
+                <span>{'Movimenta\u00e7\u00f5es da conta e compras no cart\u00e3o no m\u00eas filtrado.'}</span>
               </div>
+
+              <CategoriaSelector
+                categorias={categoriasDisponiveis}
+                value={categoriaSelecionadaId}
+                onChange={setCategoriaSelecionadaIdPreferida}
+              />
             </div>
 
-            <div className="expense-ranking">
-              <div className="expense-ranking__totals">
-                <span>Realizado: {formatarMoeda(rankingDespesasMensal.totalRealizado)}</span>
+            <div className="category-launches">
+              <div className="category-launches__summary">
+                <span>{`${lancamentosCategoriaSelecionada.length} lan\u00e7amento(s)`}</span>
+                <strong>Total: {formatarMoeda(totalCategoriaSelecionada)}</strong>
               </div>
 
-              <div className="expense-bar-chart">
-                {rankingDespesasMensal.itens.map((item) => (
-                  <div className="expense-bar-chart__row" key={item.categoria}>
-                    <span className="expense-bar-chart__label">{item.categoria}</span>
-                    <div className="expense-bar-chart__track">
-                      <div
-                        className="expense-bar-chart__bar"
-                        style={{ width: `${item.percentualRealizado}%` }}
-                        title={`${formatarMoeda(item.realizado)} - ${item.percentualRealizado.toFixed(1)}%`}
-                      />
+              <div className="category-launches__list">
+                {lancamentosCategoriaSelecionada.map((lancamento) => (
+                  <article className="category-launches__row" key={lancamento.id}>
+                    <div className="category-launches__date">
+                      <span>{formatarDataCompleta(lancamento.data)}</span>
+                      <strong>{normalizarTexto(lancamento.origem)}</strong>
                     </div>
-                    <strong>{item.percentualRealizado.toFixed(1)}%</strong>
-                    <span className="expense-bar-chart__value">{formatarMoeda(item.realizado)}</span>
-                  </div>
+
+                    <div className="category-launches__description">
+                      <strong>{normalizarTexto(lancamento.descricao)}</strong>
+                      <span>{normalizarTexto(lancamento.detalhe)}</span>
+                    </div>
+
+                    <span className="category-launches__status">
+                      {normalizarTexto(lancamento.status)}
+                    </span>
+                    <span className="category-launches__type">
+                      {normalizarTexto(lancamento.tipo)}
+                    </span>
+                    <strong className="category-launches__value">
+                      {formatarMoeda(lancamento.valor)}
+                    </strong>
+                  </article>
                 ))}
 
-                {rankingDespesasMensal.itens.length === 0 && (
-                  <p className="dashboard-empty">Nenhuma despesa encontrada no mês.</p>
+                {lancamentosCategoriaSelecionada.length === 0 && (
+                  <p className="dashboard-empty">
+                    {'Nenhum lan\u00e7amento encontrado para esta categoria.'}
+                  </p>
                 )}
               </div>
             </div>
