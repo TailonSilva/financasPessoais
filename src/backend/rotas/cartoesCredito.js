@@ -995,6 +995,9 @@ cartoesCreditoRoutes.get('/parcelas-cartao', async (req, res) => {
         categoria.descricao AS categoria,
         faturas_cartao.mes_referencia,
         faturas_cartao.ano_referencia,
+        faturas_cartao.dia_vencimento,
+        faturas_cartao.mes_vencimento,
+        faturas_cartao.ano_vencimento,
         cartoes_credito.descricao AS cartao
       FROM parcelas_cartao
       LEFT JOIN compras_cartao ON compras_cartao.id = parcelas_cartao.compra_cartao_id

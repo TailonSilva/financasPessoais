@@ -104,6 +104,25 @@ function adicionarValorCategoria(resumoPorCategoria, categoriasPorId, item, mes,
   resumo.total += valor
 }
 
+function getAnoCompetenciaParcelaCartao(parcela) {
+  return Number(parcela.ano_vencimento ?? parcela.ano_referencia)
+}
+
+function getMesCompetenciaParcelaCartao(parcela) {
+  return Number(parcela.mes_vencimento ?? parcela.mes_referencia)
+}
+
+function getDiaCompetenciaParcelaCartao(parcela) {
+  return Number(parcela.dia_vencimento ?? 1)
+}
+
+function isParcelaCartaoNoPeriodo(parcela, ano, mes) {
+  return (
+    getAnoCompetenciaParcelaCartao(parcela) === Number(ano) &&
+    getMesCompetenciaParcelaCartao(parcela) === Number(mes)
+  )
+}
+
 function montarResumoCategorias(categorias, lancamentos, ano, tipo) {
   const lancamentosDoTipo = lancamentos.filter(
     (lancamento) =>
@@ -163,13 +182,13 @@ function montarResumoDespesasCategorias(categorias, lancamentos, parcelasCartao,
     })
 
   parcelasCartao
-    .filter((parcela) => Number(parcela.ano_referencia) === ano)
+    .filter((parcela) => getAnoCompetenciaParcelaCartao(parcela) === ano)
     .forEach((parcela) => {
       adicionarValorCategoria(
         resumoPorCategoria,
         categoriasPorId,
         parcela,
-        Number(parcela.mes_referencia),
+        getMesCompetenciaParcelaCartao(parcela),
         Number(parcela.valor_parcela || 0),
       )
     })
@@ -233,11 +252,7 @@ function montarRankingDespesasMensal(categorias, lancamentos, parcelasCartao, an
   })
 
   parcelasCartao
-    .filter(
-      (parcela) =>
-        Number(parcela.ano_referencia) === ano &&
-        Number(parcela.mes_referencia) === mes,
-    )
+    .filter((parcela) => isParcelaCartaoNoPeriodo(parcela, ano, mes))
     .forEach((parcela) => {
       adicionarRanking(parcela, Number(parcela.valor_parcela || 0))
     })
@@ -270,11 +285,7 @@ function somarDespesasComCartaoMensal(categorias, lancamentos, parcelasCartao, a
     .reduce((total, lancamento) => total + Number(lancamento.valor || 0), 0)
 
   const totalCartao = parcelasCartao
-    .filter(
-      (parcela) =>
-        Number(parcela.ano_referencia) === ano &&
-        Number(parcela.mes_referencia) === mes,
-    )
+    .filter((parcela) => isParcelaCartaoNoPeriodo(parcela, ano, mes))
     .reduce((total, parcela) => total + Number(parcela.valor_parcela || 0), 0)
 
   return totalLancamentos + totalCartao
@@ -540,11 +551,7 @@ function montarDespesasFixasVariaveis(categorias, lancamentos, parcelasCartao, a
     )
     .reduce((total, lancamento) => total + Number(lancamento.valor || 0), 0)
   const totalCartao = parcelasCartao
-    .filter(
-      (parcela) =>
-        Number(parcela.ano_referencia) === ano &&
-        Number(parcela.mes_referencia) === mes,
-    )
+    .filter((parcela) => isParcelaCartaoNoPeriodo(parcela, ano, mes))
     .reduce((total, parcela) => total + Number(parcela.valor_parcela || 0), 0)
   const totalDespesasAvulsas = lancamentos
     .filter(
@@ -612,6 +619,31 @@ function montarFatiasPizzaCategorias(itens) {
   })
 }
 
+function montarMaioresCategoriasDespesa(itens, limite = 8) {
+  const maiores = itens.slice(0, limite)
+  const restantes = itens.slice(limite)
+
+  if (restantes.length === 0) {
+    return maiores
+  }
+
+  const totalOutras = restantes.reduce((total, item) => total + Number(item.realizado || 0), 0)
+  const percentualOutras = restantes.reduce(
+    (total, item) => total + Number(item.percentualRealizado || 0),
+    0,
+  )
+
+  return [
+    ...maiores,
+    {
+      categoria: 'Outras',
+      cor: '#9aa6b2',
+      percentualRealizado: percentualOutras,
+      realizado: totalOutras,
+    },
+  ]
+}
+
 function montarCategoriasDisponiveis(categorias, lancamentos, parcelasCartao, ano, mes, contasInvestimentoIds) {
   const categoriasComMovimento = new Set()
 
@@ -629,11 +661,7 @@ function montarCategoriasDisponiveis(categorias, lancamentos, parcelasCartao, an
     })
 
   parcelasCartao
-    .filter(
-      (parcela) =>
-        Number(parcela.ano_referencia) === ano &&
-        Number(parcela.mes_referencia) === mes,
-    )
+    .filter((parcela) => isParcelaCartaoNoPeriodo(parcela, ano, mes))
     .forEach((parcela) => {
       if (parcela.categoria_id) {
         categoriasComMovimento.add(Number(parcela.categoria_id))
@@ -687,15 +715,14 @@ function montarLancamentosPorCategoria(lancamentos, parcelasCartao, categoriaId,
     .filter(
       (parcela) =>
         Number(parcela.categoria_id) === categoriaSelecionadaId &&
-        Number(parcela.ano_referencia) === ano &&
-        Number(parcela.mes_referencia) === mes,
+        isParcelaCartaoNoPeriodo(parcela, ano, mes),
     )
     .map((parcela) => ({
       id: `cartao-${parcela.id}`,
       data: {
-        ano: parcela.ano_referencia,
-        dia: 1,
-        mes: parcela.mes_referencia,
+        ano: getAnoCompetenciaParcelaCartao(parcela),
+        dia: getDiaCompetenciaParcelaCartao(parcela),
+        mes: getMesCompetenciaParcelaCartao(parcela),
       },
       descricao: parcela.compra || 'Compra no cart\u00e3o',
       detalhe: `${parcela.cartao || 'Cart\u00e3o'} - parcela ${parcela.numero_parcela}/${parcela.total_parcelas}`,
@@ -782,6 +809,7 @@ function Home() {
   const [categorias, setCategorias] = useState([])
   const [lancamentos, setLancamentos] = useState([])
   const [parcelasCartao, setParcelasCartao] = useState([])
+  const [modalCategoriasAberto, setModalCategoriasAberto] = useState(false)
   const [mesSelecionado, setMesSelecionado] = useState(() => new Date().getMonth() + 1)
   const [anoSelecionado, setAnoSelecionado] = useState(() => new Date().getFullYear())
   const [categoriaSelecionadaIdPreferida, setCategoriaSelecionadaIdPreferida] = useState(null)
@@ -932,9 +960,13 @@ function Home() {
     ),
     [anoSelecionado, categorias, lancamentos, mesSelecionado, parcelasCartao],
   )
-  const fatiasDespesasMensal = useMemo(
-    () => montarFatiasPizzaCategorias(rankingDespesasMensal.itens),
+  const maioresDespesasMensal = useMemo(
+    () => montarMaioresCategoriasDespesa(rankingDespesasMensal.itens),
     [rankingDespesasMensal],
+  )
+  const fatiasDespesasMensal = useMemo(
+    () => montarFatiasPizzaCategorias(maioresDespesasMensal),
+    [maioresDespesasMensal],
   )
   const graficoPizzaCategorias = fatiasDespesasMensal.length
     ? `conic-gradient(${fatiasDespesasMensal
@@ -949,16 +981,6 @@ function Home() {
       contasInvestimentoIds,
     ),
     [anoSelecionado, contasInvestimentoIds, lancamentos, mesSelecionado],
-  )
-  const saldoProjetadoDiario = useMemo(
-    () => montarSaldoProjetadoDiario(
-      lancamentos,
-      totalSaldoAtual,
-      anoSelecionado,
-      mesSelecionado,
-      contasInvestimentoIds,
-    ),
-    [anoSelecionado, contasInvestimentoIds, lancamentos, mesSelecionado, totalSaldoAtual],
   )
   const variacaoCategorias = useMemo(
     () => montarVariacaoCategorias(resumoDespesasPorCategoria, mesSelecionado),
@@ -1259,42 +1281,21 @@ function Home() {
           </div>
 
           <div className="dashboard-insights dashboard-insights--wide">
-            <section className="dashboard-panel">
-              <div className="dashboard-section-header">
-                <div>
-                  <h2>Saldo projetado por dia</h2>
-                  <span>Saldo após cada pendência prevista no mês.</span>
-                </div>
-              </div>
-
-              <div className="projection-list">
-                {saldoProjetadoDiario.map((ponto) => (
-                  <div
-                    className="projection-list__row"
-                    key={`${ponto.dia}-${ponto.saldo}`}
-                    title={`Saldo projetado neste dia = saldo anterior somado ao impacto pendente do dia (${formatarMoeda(ponto.impacto)}).`}
-                  >
-                    <span>{formatarDataCurta(ponto)}</span>
-                    <div>
-                      <strong>{formatarMoeda(ponto.saldo)}</strong>
-                      <small className={ponto.impacto >= 0 ? 'metric-positive' : 'metric-negative'}>
-                        {ponto.impacto >= 0 ? '+' : ''}{formatarMoeda(ponto.impacto)}
-                      </small>
-                    </div>
-                  </div>
-                ))}
-                {saldoProjetadoDiario.length === 0 && (
-                  <p className="dashboard-empty">Nenhuma pendência futura para projetar.</p>
-                )}
-              </div>
-            </section>
-
-            <section className="dashboard-panel">
+            <section className="dashboard-panel dashboard-panel--double">
               <div className="dashboard-section-header">
                 <div>
                   <h2>Despesas por categoria</h2>
-                  <span>{'Realizado no m\u00eas filtrado.'}</span>
+                  <span>{'Maiores categorias realizadas no m\u00eas filtrado.'}</span>
                 </div>
+                {rankingDespesasMensal.itens.length > 8 && (
+                  <button
+                    className="dashboard-link-button"
+                    type="button"
+                    onClick={() => setModalCategoriasAberto(true)}
+                  >
+                    Ver todas
+                  </button>
+                )}
               </div>
 
               <div className="expense-ranking">
@@ -1369,6 +1370,53 @@ function Home() {
               </div>
             </section>
           </div>
+
+          {modalCategoriasAberto && (
+            <div
+              className="launch-modal"
+              role="presentation"
+              onMouseDown={() => setModalCategoriasAberto(false)}
+            >
+              <div
+                className="launch-modal__panel dashboard-category-modal"
+                onMouseDown={(event) => event.stopPropagation()}
+              >
+                <header className="launch-modal__header">
+                  <div>
+                    <h2>Todas as categorias</h2>
+                    <p>{'Despesas realizadas no mês filtrado.'}</p>
+                  </div>
+                  <button
+                    className="launch-modal__close"
+                    type="button"
+                    onClick={() => setModalCategoriasAberto(false)}
+                    aria-label="Fechar"
+                    title="Fechar"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M6 6l12 12" />
+                      <path d="M18 6 6 18" />
+                    </svg>
+                  </button>
+                </header>
+
+                <div className="dashboard-category-modal__list">
+                  {rankingDespesasMensal.itens.map((item) => (
+                    <div className="expense-pie-chart__legend-row" key={item.categoria}>
+                      <span
+                        className="expense-pie-chart__swatch"
+                        style={{ backgroundColor: item.cor || '#9aa6b2' }}
+                        aria-hidden="true"
+                      />
+                      <span className="expense-pie-chart__label">{item.categoria}</span>
+                      <strong>{item.percentualRealizado.toFixed(1)}%</strong>
+                      <span className="expense-pie-chart__value">{formatarMoeda(item.realizado)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="box-grid">
             <div className="dashboard-section-header">
