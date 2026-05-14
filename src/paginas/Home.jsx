@@ -123,6 +123,20 @@ function isParcelaCartaoNoPeriodo(parcela, ano, mes) {
   )
 }
 
+function isFaturaParcelaCartaoPaga(parcela) {
+  return Number(parcela.fatura_valor_aberto ?? 1) <= 0
+}
+
+function formatarDescricaoParcelaCartao(parcela) {
+  const descricao = parcela.compra || 'Compra no cart\u00e3o'
+
+  if (Number(parcela.total_parcelas || 1) <= 1) {
+    return descricao
+  }
+
+  return `${descricao} (${parcela.numero_parcela}/${parcela.total_parcelas})`
+}
+
 function montarResumoCategorias(categorias, lancamentos, ano, tipo) {
   const lancamentosDoTipo = lancamentos.filter(
     (lancamento) =>
@@ -246,9 +260,7 @@ function montarRankingDespesasMensal(categorias, lancamentos, parcelasCartao, an
   }
 
   despesasDoMes.forEach((lancamento) => {
-    if (lancamento.data_pagamento) {
-      adicionarRanking(lancamento, Number(lancamento.valor || 0))
-    }
+    adicionarRanking(lancamento, Number(lancamento.valor || 0))
   })
 
   parcelasCartao
@@ -528,14 +540,45 @@ function montarVariacaoCategorias(resumoCategorias, mes) {
       return {
         categoria: categoria.categoria,
         diferenca,
-        percentual: anterior > 0 ? (diferenca / anterior) * 100 : null,
+        percentual: anterior > 0 ? (diferenca / anterior) * 100 : atual > 0 ? 100 : 0,
         atual,
         anterior,
       }
     })
     .filter((item) => item.atual > 0 || item.anterior > 0)
     .sort((a, b) => Math.abs(b.diferenca) - Math.abs(a.diferenca))
-    .slice(0, 5)
+}
+
+function getIndicadorVariacaoCategoria(item) {
+  if (item.diferenca < 0) {
+    return {
+      classe: 'category-change-list__indicator--down',
+      titulo: 'Reduziu o gasto',
+    }
+  }
+
+  if (item.diferenca > 0) {
+    return {
+      classe: 'category-change-list__indicator--up',
+      titulo: 'Aumentou o gasto',
+    }
+  }
+
+  return {
+    classe: 'category-change-list__indicator--flat',
+    titulo: 'Sem variação',
+  }
+}
+
+function formatarPercentualVariacao(item) {
+  const percentual = Number(item.percentual || 0)
+  const sinal = percentual > 0 ? '+' : percentual < 0 ? '-' : ''
+
+  return `${sinal}${Math.abs(percentual).toFixed(1)}%`
+}
+
+function formatarOrigemLancamentoCategoria(origem) {
+  return normalizarTexto(origem)?.replace(/^Conta\s+/i, '') || ''
 }
 
 function montarDespesasFixasVariaveis(categorias, lancamentos, parcelasCartao, ano, mes) {
@@ -619,7 +662,7 @@ function montarFatiasPizzaCategorias(itens) {
   })
 }
 
-function montarMaioresCategoriasDespesa(itens, limite = 8) {
+function montarMaioresCategoriasDespesa(itens, limite = 7) {
   const maiores = itens.slice(0, limite)
   const restantes = itens.slice(limite)
 
@@ -644,15 +687,14 @@ function montarMaioresCategoriasDespesa(itens, limite = 8) {
   ]
 }
 
-function montarCategoriasDisponiveis(categorias, lancamentos, parcelasCartao, ano, mes, contasInvestimentoIds) {
+function montarCategoriasDisponiveis(categorias, lancamentos, parcelasCartao, ano, mes) {
   const categoriasComMovimento = new Set()
 
   lancamentos
     .filter(
       (lancamento) =>
         Number(lancamento.ano_vencimento) === ano &&
-        Number(lancamento.mes_vencimento) === mes &&
-        !isLancamentoEmContaInvestimento(lancamento, contasInvestimentoIds),
+        Number(lancamento.mes_vencimento) === mes,
     )
     .forEach((lancamento) => {
       if (lancamento.categoria_id) {
@@ -669,13 +711,17 @@ function montarCategoriasDisponiveis(categorias, lancamentos, parcelasCartao, an
     })
 
   return categorias
-    .filter((categoria) => categoriasComMovimento.has(Number(categoria.id)))
+    .filter(
+      (categoria) =>
+        categoriasComMovimento.has(Number(categoria.id)) &&
+        !isCategoriaCartaoCredito(categoria),
+    )
     .sort((categoriaA, categoriaB) =>
       categoriaA.descricao.localeCompare(categoriaB.descricao, 'pt-BR'),
     )
 }
 
-function montarLancamentosPorCategoria(lancamentos, parcelasCartao, categoriaId, ano, mes, contasInvestimentoIds) {
+function montarLancamentosPorCategoria(lancamentos, parcelasCartao, categoriaId, ano, mes) {
   if (!categoriaId) {
     return []
   }
@@ -686,8 +732,7 @@ function montarLancamentosPorCategoria(lancamentos, parcelasCartao, categoriaId,
       (lancamento) =>
         Number(lancamento.categoria_id) === categoriaSelecionadaId &&
         Number(lancamento.ano_vencimento) === ano &&
-        Number(lancamento.mes_vencimento) === mes &&
-        !isLancamentoEmContaInvestimento(lancamento, contasInvestimentoIds),
+        Number(lancamento.mes_vencimento) === mes,
     )
     .map((lancamento) => {
       const detalhe =
@@ -704,7 +749,7 @@ function montarLancamentosPorCategoria(lancamentos, parcelasCartao, categoriaId,
         },
         descricao: lancamento.descricao,
         detalhe,
-        origem: 'Conta',
+        origem: detalhe,
         status: lancamento.data_pagamento ? 'Realizado' : 'Pendente',
         tipo: lancamento.tipo_lancamento,
         valor: Number(lancamento.valor || 0),
@@ -724,10 +769,10 @@ function montarLancamentosPorCategoria(lancamentos, parcelasCartao, categoriaId,
         dia: getDiaCompetenciaParcelaCartao(parcela),
         mes: getMesCompetenciaParcelaCartao(parcela),
       },
-      descricao: parcela.compra || 'Compra no cart\u00e3o',
+      descricao: formatarDescricaoParcelaCartao(parcela),
       detalhe: `${parcela.cartao || 'Cart\u00e3o'} - parcela ${parcela.numero_parcela}/${parcela.total_parcelas}`,
-      origem: 'Cart\u00e3o',
-      status: 'Na fatura',
+      origem: parcela.cartao || 'Cart\u00e3o',
+      status: isFaturaParcelaCartaoPaga(parcela) ? 'Realizado' : 'Na fatura',
       tipo: 'Despesa',
       valor: Number(parcela.valor_parcela || 0),
     }))
@@ -810,6 +855,7 @@ function Home() {
   const [lancamentos, setLancamentos] = useState([])
   const [parcelasCartao, setParcelasCartao] = useState([])
   const [modalCategoriasAberto, setModalCategoriasAberto] = useState(false)
+  const [modalVariacaoCategoriasAberto, setModalVariacaoCategoriasAberto] = useState(false)
   const [mesSelecionado, setMesSelecionado] = useState(() => new Date().getMonth() + 1)
   const [anoSelecionado, setAnoSelecionado] = useState(() => new Date().getFullYear())
   const [categoriaSelecionadaIdPreferida, setCategoriaSelecionadaIdPreferida] = useState(null)
@@ -874,9 +920,8 @@ function Home() {
         parcelasCartao,
         anoSelecionado,
         mesSelecionado,
-        contasInvestimentoIds,
       ),
-    [anoSelecionado, categorias, contasInvestimentoIds, lancamentos, mesSelecionado, parcelasCartao],
+    [anoSelecionado, categorias, lancamentos, mesSelecionado, parcelasCartao],
   )
   const categoriaSelecionadaId = useMemo(() => {
     if (categoriasDisponiveis.length === 0) {
@@ -986,6 +1031,10 @@ function Home() {
     () => montarVariacaoCategorias(resumoDespesasPorCategoria, mesSelecionado),
     [mesSelecionado, resumoDespesasPorCategoria],
   )
+  const maioresVariacoesCategorias = useMemo(
+    () => variacaoCategorias.slice(0, 6),
+    [variacaoCategorias],
+  )
   const despesasFixasVariaveis = useMemo(
     () => montarDespesasFixasVariaveis(
       categorias,
@@ -1010,12 +1059,10 @@ function Home() {
         categoriaSelecionadaId,
         anoSelecionado,
         mesSelecionado,
-        contasInvestimentoIds,
       ),
     [
       anoSelecionado,
       categoriaSelecionadaId,
-      contasInvestimentoIds,
       lancamentos,
       mesSelecionado,
       parcelasCartao,
@@ -1285,9 +1332,9 @@ function Home() {
               <div className="dashboard-section-header">
                 <div>
                   <h2>Despesas por categoria</h2>
-                  <span>{'Maiores categorias realizadas no m\u00eas filtrado.'}</span>
+                  <span>{'Maiores categorias lançadas no m\u00eas filtrado.'}</span>
                 </div>
-                {rankingDespesasMensal.itens.length > 8 && (
+                {rankingDespesasMensal.itens.length > 7 && (
                   <button
                     className="dashboard-link-button"
                     type="button"
@@ -1300,7 +1347,7 @@ function Home() {
 
               <div className="expense-ranking">
                 <div className="expense-ranking__totals">
-                  <span>Realizado: {formatarMoeda(rankingDespesasMensal.totalRealizado)}</span>
+                  <span>Lançado: {formatarMoeda(rankingDespesasMensal.totalRealizado)}</span>
                 </div>
 
                 <div className="expense-pie-chart expense-pie-chart--panel">
@@ -1346,24 +1393,41 @@ function Home() {
                   <h2>Variação por categoria</h2>
                   <span>Maiores mudanças contra o mês anterior.</span>
                 </div>
+                {variacaoCategorias.length > 6 && (
+                  <button
+                    className="dashboard-link-button"
+                    type="button"
+                    onClick={() => setModalVariacaoCategoriasAberto(true)}
+                  >
+                    Ver todas
+                  </button>
+                )}
               </div>
 
               <div className="category-change-list">
-                {variacaoCategorias.map((item) => (
-                  <div
-                    className="category-change-list__row"
-                    key={item.categoria}
-                    title={`Variacao = mes atual (${formatarMoeda(item.atual)}) menos mes anterior (${formatarMoeda(item.anterior)}).`}
-                  >
-                    <span>{item.categoria}</span>
-                    <strong className={item.diferenca >= 0 ? 'metric-negative' : 'metric-positive'}>
-                      {item.diferenca >= 0 ? '+' : ''}{formatarMoeda(item.diferenca)}
-                    </strong>
-                    <small>
-                      {item.percentual === null ? 'novo valor' : `${item.percentual.toFixed(1)}%`}
-                    </small>
-                  </div>
-                ))}
+                {maioresVariacoesCategorias.map((item) => {
+                  const indicador = getIndicadorVariacaoCategoria(item)
+
+                  return (
+                    <div
+                      className="category-change-list__row"
+                      key={item.categoria}
+                      title={`Variação = mês atual (${formatarMoeda(item.atual)}) menos mês anterior (${formatarMoeda(item.anterior)}).`}
+                    >
+                      <span>{item.categoria}</span>
+                      <strong className={item.diferenca >= 0 ? 'metric-negative' : 'metric-positive'}>
+                        {item.diferenca >= 0 ? '+' : ''}{formatarMoeda(item.diferenca)}
+                      </strong>
+                      <span
+                        className={`category-change-list__indicator ${indicador.classe}`}
+                        title={indicador.titulo}
+                        aria-label={indicador.titulo}
+                      >
+                        {formatarPercentualVariacao(item)}
+                      </span>
+                    </div>
+                  )
+                })}
                 {variacaoCategorias.length === 0 && (
                   <p className="dashboard-empty">Sem mês anterior para comparar.</p>
                 )}
@@ -1384,7 +1448,7 @@ function Home() {
                 <header className="launch-modal__header">
                   <div>
                     <h2>Todas as categorias</h2>
-                    <p>{'Despesas realizadas no mês filtrado.'}</p>
+                    <p>{'Despesas lançadas no mês filtrado.'}</p>
                   </div>
                   <button
                     className="launch-modal__close"
@@ -1413,6 +1477,64 @@ function Home() {
                       <span className="expense-pie-chart__value">{formatarMoeda(item.realizado)}</span>
                     </div>
                   ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {modalVariacaoCategoriasAberto && (
+            <div
+              className="launch-modal"
+              role="presentation"
+              onMouseDown={() => setModalVariacaoCategoriasAberto(false)}
+            >
+              <div
+                className="launch-modal__panel dashboard-category-modal"
+                onMouseDown={(event) => event.stopPropagation()}
+              >
+                <header className="launch-modal__header">
+                  <div>
+                    <h2>Variação por categoria</h2>
+                    <p>Todas as mudanças contra o mês anterior.</p>
+                  </div>
+                  <button
+                    className="launch-modal__close"
+                    type="button"
+                    onClick={() => setModalVariacaoCategoriasAberto(false)}
+                    aria-label="Fechar"
+                    title="Fechar"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M6 6l12 12" />
+                      <path d="M18 6 6 18" />
+                    </svg>
+                  </button>
+                </header>
+
+                <div className="category-change-list">
+                  {variacaoCategorias.map((item) => {
+                    const indicador = getIndicadorVariacaoCategoria(item)
+
+                    return (
+                      <div
+                        className="category-change-list__row"
+                        key={item.categoria}
+                        title={`Variação = mês atual (${formatarMoeda(item.atual)}) menos mês anterior (${formatarMoeda(item.anterior)}).`}
+                      >
+                        <span>{item.categoria}</span>
+                        <strong className={item.diferenca >= 0 ? 'metric-negative' : 'metric-positive'}>
+                          {item.diferenca >= 0 ? '+' : ''}{formatarMoeda(item.diferenca)}
+                        </strong>
+                        <span
+                          className={`category-change-list__indicator ${indicador.classe}`}
+                          title={indicador.titulo}
+                          aria-label={indicador.titulo}
+                        >
+                          {formatarPercentualVariacao(item)}
+                        </span>
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
             </div>
@@ -1465,15 +1587,23 @@ function Home() {
                   <article className="category-launches__row" key={lancamento.id}>
                     <div className="category-launches__date">
                       <span>{formatarDataCompleta(lancamento.data)}</span>
-                      <strong>{normalizarTexto(lancamento.origem)}</strong>
                     </div>
+
+                    <strong className="category-launches__account">
+                      {formatarOrigemLancamentoCategoria(lancamento.origem)}
+                    </strong>
 
                     <div className="category-launches__description">
                       <strong>{normalizarTexto(lancamento.descricao)}</strong>
-                      <span>{normalizarTexto(lancamento.detalhe)}</span>
                     </div>
 
-                    <span className="category-launches__status">
+                    <span
+                      className={`category-launches__status ${
+                        lancamento.status === 'Realizado'
+                          ? 'category-launches__status--done'
+                          : 'category-launches__status--pending'
+                      }`}
+                    >
                       {normalizarTexto(lancamento.status)}
                     </span>
                     <span className="category-launches__type">

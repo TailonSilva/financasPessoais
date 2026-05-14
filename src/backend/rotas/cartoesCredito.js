@@ -998,6 +998,21 @@ cartoesCreditoRoutes.get('/parcelas-cartao', async (req, res) => {
         faturas_cartao.dia_vencimento,
         faturas_cartao.mes_vencimento,
         faturas_cartao.ano_vencimento,
+        COALESCE((
+          SELECT SUM(valor)
+          FROM ajustes_fatura_cartao
+          WHERE ajustes_fatura_cartao.fatura_cartao_id = faturas_cartao.id
+            AND ajustes_fatura_cartao.tipo = 'pagamento'
+        ), 0) AS fatura_valor_pago,
+        MAX(
+          faturas_cartao.valor_total - COALESCE((
+            SELECT SUM(valor)
+            FROM ajustes_fatura_cartao
+            WHERE ajustes_fatura_cartao.fatura_cartao_id = faturas_cartao.id
+              AND ajustes_fatura_cartao.tipo = 'pagamento'
+          ), 0),
+          0
+        ) AS fatura_valor_aberto,
         cartoes_credito.descricao AS cartao
       FROM parcelas_cartao
       LEFT JOIN compras_cartao ON compras_cartao.id = parcelas_cartao.compra_cartao_id
