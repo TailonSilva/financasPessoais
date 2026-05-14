@@ -150,6 +150,7 @@ function ContaCartao() {
   const [menuContexto, setMenuContexto] = useState(null);
   const [menuNovoAberto, setMenuNovoAberto] = useState(false);
   const [modalInclusao, setModalInclusao] = useState(null);
+  const [registroCopiado, setRegistroCopiado] = useState(null);
   const [modalAcao, setModalAcao] = useState(null);
   const [acaoParceladaPendente, setAcaoParceladaPendente] = useState(null);
   const [cartaoEstornoSelecionado, setCartaoEstornoSelecionado] = useState("");
@@ -249,6 +250,24 @@ function ContaCartao() {
     setMenuContexto(null);
 
     if (!contexto) {
+      return;
+    }
+
+    if (acao === "copiar") {
+      const tipoInclusao = isParcelaCartao(contexto.linha)
+        ? "Despesa no cartão"
+        : contexto.linha.tipo === "pagamento"
+          ? "Pagamento"
+          : "Estorno";
+
+      setRegistroCopiado({
+        fatura: contexto.fatura,
+        linha: contexto.linha,
+        tipo: tipoInclusao,
+      });
+      setModalInclusao(tipoInclusao);
+      setCartaoEstornoSelecionado(String(contexto.fatura.cartao_id || ""));
+      setMenuNovoAberto(false);
       return;
     }
 
@@ -391,6 +410,7 @@ function ContaCartao() {
 
       await recarregarDadosCartao();
       setModalInclusao(null);
+      setRegistroCopiado(null);
     } catch (error) {
       notificarErro(error.message);
     }
@@ -430,6 +450,7 @@ function ContaCartao() {
                       type="button"
                       onClick={() => {
                         setModalInclusao(tipo);
+                        setRegistroCopiado(null);
                         setCartaoEstornoSelecionado("");
                         setMenuNovoAberto(false);
                       }}
@@ -495,7 +516,6 @@ function ContaCartao() {
                         <col className="invoice-table__col-installment" />
                         <col className="invoice-table__col-account" />
                         <col className="invoice-table__col-status" />
-                        <col className="invoice-table__col-launch" />
                         <col className="invoice-table__col-value" />
                       </colgroup>
                       <thead>
@@ -505,7 +525,6 @@ function ContaCartao() {
                           <th>Parcela</th>
                           <th>Conta Pagamento</th>
                           <th>Status</th>
-                          <th>Lançamento</th>
                           <th>Valor</th>
                         </tr>
                       </thead>
@@ -535,7 +554,6 @@ function ContaCartao() {
                               {fatura.conta_pagamento}
                             </td>
                             <td className="invoice-table__center">{fatura.status}</td>
-                            <td className="invoice-table__center">{fatura.lancamento_id}</td>
                             <td className="invoice-table__money">{formatarMoeda(parcela.valor_parcela)}</td>
                           </tr>
                         ))}
@@ -553,22 +571,21 @@ function ContaCartao() {
                               {fatura.conta_pagamento}
                             </td>
                             <td className="invoice-table__center">{fatura.status}</td>
-                            <td className="invoice-table__center">{fatura.lancamento_id}</td>
                             <td className="invoice-table__money">{formatarMoeda(-Number(ajuste.valor))}</td>
                           </tr>
                         ))}
                       </tbody>
                       <tfoot>
                         <tr>
-                          <td className="invoice-table__total-label" colSpan="6">Total da fatura</td>
+                          <td className="invoice-table__total-label" colSpan="5">Total da fatura</td>
                           <td className="invoice-table__money">{formatarMoeda(fatura.valor_total)}</td>
                         </tr>
                         <tr>
-                          <td className="invoice-table__total-label" colSpan="6">Total pago</td>
+                          <td className="invoice-table__total-label" colSpan="5">Total pago</td>
                           <td className="invoice-table__money">{formatarMoeda(fatura.valor_pago || 0)}</td>
                         </tr>
                         <tr>
-                          <td className="invoice-table__total-label" colSpan="6">Em aberto</td>
+                          <td className="invoice-table__total-label" colSpan="5">Em aberto</td>
                           <td className="invoice-table__money">
                             {formatarMoeda(fatura.valor_aberto ?? fatura.valor_total)}
                           </td>
@@ -594,6 +611,9 @@ function ContaCartao() {
           </button>
           <button type="button" onClick={() => executarAcao("editar")}>
             Editar
+          </button>
+          <button type="button" onClick={() => executarAcao("copiar")}>
+            Copiar
           </button>
           <button type="button" onClick={() => executarAcao("excluir")}>
             Excluir
@@ -750,7 +770,10 @@ function ContaCartao() {
         <div
           className="launch-modal"
           role="presentation"
-          onMouseDown={() => setModalInclusao(null)}
+          onMouseDown={() => {
+            setModalInclusao(null);
+            setRegistroCopiado(null);
+          }}
         >
           <form
             className="launch-modal__panel"
@@ -759,13 +782,16 @@ function ContaCartao() {
           >
             <header className="launch-modal__header">
               <div>
-                <h2>Incluir no cartão</h2>
+                <h2>{registroCopiado ? "Copiar no cartão" : "Incluir no cartão"}</h2>
                 <p>{modalInclusao}</p>
               </div>
               <button
                 className="launch-modal__close"
                 type="button"
-                onClick={() => setModalInclusao(null)}
+                onClick={() => {
+                  setModalInclusao(null);
+                  setRegistroCopiado(null);
+                }}
                 aria-label="Fechar"
                 title="Fechar"
               >
@@ -781,7 +807,11 @@ function ContaCartao() {
                 <>
                   <label>
                     Cartão
-                    <select name="cartao_id" required>
+                    <select
+                      name="cartao_id"
+                      defaultValue={registroCopiado?.fatura?.cartao_id ?? ""}
+                      required
+                    >
                       <option value="">Selecione</option>
                       {cartoes.map((cartao) => (
                         <option key={cartao.id} value={cartao.id}>
@@ -792,11 +822,19 @@ function ContaCartao() {
                   </label>
                   <label>
                     Descrição
-                    <input name="descricao" type="text" required />
+                    <input
+                      name="descricao"
+                      type="text"
+                      defaultValue={registroCopiado?.linha?.compra ?? ""}
+                      required
+                    />
                   </label>
                   <label>
                     Categoria
-                    <select name="categoria_id">
+                    <select
+                      name="categoria_id"
+                      defaultValue={registroCopiado?.linha?.categoria_id ?? ""}
+                    >
                       <option value="">Sem categoria</option>
                       {categoriasCompraCartao.map((categoria) => (
                         <option key={categoria.id} value={categoria.id}>
@@ -807,7 +845,14 @@ function ContaCartao() {
                   </label>
                   <label>
                     Valor da parcela
-                    <input name="valor_parcela" type="number" min="0.01" step="0.01" required />
+                    <input
+                      name="valor_parcela"
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      defaultValue={registroCopiado?.linha?.valor_parcela ?? ""}
+                      required
+                    />
                   </label>
                   <label>
                     Parcelas
@@ -815,7 +860,7 @@ function ContaCartao() {
                       name="quantidade_parcelas"
                       type="number"
                       min="1"
-                      defaultValue="1"
+                      defaultValue={registroCopiado?.linha?.total_parcelas ?? "1"}
                       required
                     />
                   </label>
@@ -825,7 +870,15 @@ function ContaCartao() {
                   </label>
                   <label>
                     Primeira fatura
-                    <select name="primeira_fatura" required>
+                    <select
+                      name="primeira_fatura"
+                      defaultValue={
+                        registroCopiado?.fatura
+                          ? `${registroCopiado.fatura.mes_referencia}-${registroCopiado.fatura.ano_referencia}`
+                          : undefined
+                      }
+                      required
+                    >
                       {opcoesPrimeiraFatura.map((opcao) => (
                         <option key={opcao.value} value={opcao.value}>
                           {opcao.label}
@@ -856,6 +909,7 @@ function ContaCartao() {
                     Fatura
                     <select
                       name="fatura_cartao_id"
+                      defaultValue={registroCopiado?.fatura?.id ?? ""}
                       disabled={!cartaoEstornoSelecionado}
                       required
                     >
@@ -873,14 +927,22 @@ function ContaCartao() {
                       name="descricao"
                       type="text"
                       defaultValue={
-                        modalInclusao === "Pagamento" ? "Pagamento parcial da fatura" : ""
+                        registroCopiado?.linha?.descricao ??
+                        (modalInclusao === "Pagamento" ? "Pagamento parcial da fatura" : "")
                       }
                       required
                     />
                   </label>
                   <label>
                     {modalInclusao === "Pagamento" ? "Valor pago" : "Valor do estorno"}
-                    <input name="valor" type="number" min="0.01" step="0.01" required />
+                    <input
+                      name="valor"
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      defaultValue={registroCopiado?.linha?.valor ?? ""}
+                      required
+                    />
                   </label>
                   <label>
                     {modalInclusao === "Pagamento" ? "Data do pagamento" : "Data do estorno"}
@@ -896,7 +958,13 @@ function ContaCartao() {
             </div>
 
             <footer className="launch-modal__footer">
-              <button type="button" onClick={() => setModalInclusao(null)}>
+              <button
+                type="button"
+                onClick={() => {
+                  setModalInclusao(null);
+                  setRegistroCopiado(null);
+                }}
+              >
                 Cancelar
               </button>
               <button type="submit">Salvar</button>

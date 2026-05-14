@@ -650,7 +650,7 @@ function Lancamentos() {
                 <input
                   name="data_vencimento"
                   type="date"
-                  defaultValue={lancamentoCopiado ? getDataVencimentoInput(lancamentoCopiado) : `${anoSelecionado}-${String(mesSelecionado).padStart(
+                  defaultValue={lancamentoCopiado ? getDataAtualInput() : `${anoSelecionado}-${String(mesSelecionado).padStart(
                     2,
                     "0",
                   )}-${String(new Date().getDate()).padStart(2, "0")}`}
@@ -729,7 +729,7 @@ function Lancamentos() {
                 <input
                   name="data_pagamento"
                   type="date"
-                  defaultValue={lancamentoCopiado?.data_pagamento ?? ""}
+                  defaultValue={lancamentoCopiado ? getDataAtualInput() : ""}
                   max={getDataAtualInput()}
                 />
               </label>

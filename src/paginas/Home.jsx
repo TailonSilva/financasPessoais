@@ -1131,6 +1131,73 @@ function Home() {
             </article>
           </div>
 
+          <div className="box-grid">
+            <div className="dashboard-section-header">
+              <div>
+                <h2>Contas ativas</h2>
+                <span>Saldo inicial mais movimentações para conferência com o banco</span>
+              </div>
+            </div>
+
+            <div className="account-indicators">
+              {contasComSaldo.map((conta) => (
+                <article className="account-indicator" key={conta.id}>
+                  <div className="account-indicator__identity">
+                    <h3>{conta.descricao}</h3>
+                    <span>
+                      {conta.banco || 'Sem banco'}
+                      {isContaInvestimento(conta) ? ' - fora dos totais gerais' : ''}
+                    </span>
+                  </div>
+
+                  <table className="account-indicator__table">
+                    <thead>
+                      <tr>
+                        <th />
+                        <th>Realizado</th>
+                        <th>Previsto</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[
+                        {
+                          label: 'Saldo',
+                          previsto: conta.saldoPrevisto,
+                          realizado: conta.saldoAtualCalculado,
+                        },
+                        {
+                          label: 'Receitas',
+                          previsto: conta.receitasPrevistas,
+                          realizado: conta.receitasRealizadas,
+                        },
+                        {
+                          label: 'Despesas',
+                          previsto: conta.despesasPrevistas,
+                          realizado: conta.despesasRealizadas,
+                        },
+                        {
+                          label: 'Transferências',
+                          previsto: conta.transferenciasPrevistas,
+                          realizado: conta.transferenciasRealizadas,
+                        },
+                      ].map((indicador) => (
+                        <tr key={indicador.label}>
+                          <td>{indicador.label}</td>
+                          <td>{formatarMoeda(indicador.realizado)}</td>
+                          <td>{formatarMoeda(indicador.previsto)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </article>
+              ))}
+
+              {contasComSaldo.length === 0 && (
+                <p className="dashboard-empty">Nenhuma conta cadastrada.</p>
+              )}
+            </div>
+          </div>
+
           <div className="dashboard-insights">
             <section className="dashboard-panel dashboard-panel--compact">
               <div className="dashboard-section-header">
@@ -1301,73 +1368,6 @@ function Home() {
                 )}
               </div>
             </section>
-          </div>
-
-          <div className="box-grid">
-            <div className="dashboard-section-header">
-              <div>
-                <h2>Contas ativas</h2>
-                <span>Saldo inicial mais movimentações para conferência com o banco</span>
-              </div>
-            </div>
-
-            <div className="account-indicators">
-              {contasComSaldo.map((conta) => (
-                <article className="account-indicator" key={conta.id}>
-                  <div className="account-indicator__identity">
-                    <h3>{conta.descricao}</h3>
-                    <span>
-                      {conta.banco || 'Sem banco'}
-                      {isContaInvestimento(conta) ? ' - fora dos totais gerais' : ''}
-                    </span>
-                  </div>
-
-                  <table className="account-indicator__table">
-                    <thead>
-                      <tr>
-                        <th />
-                        <th>Realizado</th>
-                        <th>Previsto</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {[
-                        {
-                          label: 'Saldo',
-                          previsto: conta.saldoPrevisto,
-                          realizado: conta.saldoAtualCalculado,
-                        },
-                        {
-                          label: 'Receitas',
-                          previsto: conta.receitasPrevistas,
-                          realizado: conta.receitasRealizadas,
-                        },
-                        {
-                          label: 'Despesas',
-                          previsto: conta.despesasPrevistas,
-                          realizado: conta.despesasRealizadas,
-                        },
-                        {
-                          label: 'Transferências',
-                          previsto: conta.transferenciasPrevistas,
-                          realizado: conta.transferenciasRealizadas,
-                        },
-                      ].map((indicador) => (
-                        <tr key={indicador.label}>
-                          <td>{indicador.label}</td>
-                          <td>{formatarMoeda(indicador.realizado)}</td>
-                          <td>{formatarMoeda(indicador.previsto)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </article>
-              ))}
-
-              {contasComSaldo.length === 0 && (
-                <p className="dashboard-empty">Nenhuma conta cadastrada.</p>
-              )}
-            </div>
           </div>
 
           <div className="box-grid">
