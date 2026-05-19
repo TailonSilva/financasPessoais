@@ -24,8 +24,8 @@ export async function fetchContas() {
   return Array.isArray(dados) ? dados : []
 }
 
-export async function fetchCategorias() {
-  const response = await fetch(apiUrl('/api/categorias'))
+export async function fetchCategorias({ incluirInativos = false } = {}) {
+  const response = await fetch(apiUrl(`/api/categorias${incluirInativos ? '?incluirInativos=1' : ''}`))
 
   if (!response.ok) {
     throw new Error('Não foi possível carregar as categorias')

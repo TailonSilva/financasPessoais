@@ -5,6 +5,7 @@ import FluxoCaixa from './paginas/FluxoCaixa'
 import Lancamentos from './paginas/Lancamentos'
 import ContaCartao from './paginas/ContaCartao'
 import Configuracao from './paginas/Configuracao'
+import Simulacao from './paginas/Simulacao'
 import { NotificacoesProvider } from './componentes/Notificacoes'
 
 function App() {
@@ -17,6 +18,7 @@ function App() {
           <Route path="/fluxo-caixa" element={<FluxoCaixa />} />
           <Route path="/cartao-credito" element={<ContaCartao />} />
           <Route path="/lancamentos" element={<Lancamentos />} />
+          <Route path="/simulacao" element={<Simulacao />} />
           <Route path="/configuracoes" element={<Configuracao />} />
         </Routes>
       </main>

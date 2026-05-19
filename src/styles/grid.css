@@ -145,6 +145,156 @@
   line-height: 1;
 }
 
+.simulation-section {
+  gap: 14px;
+}
+
+.simulation-section__header {
+  align-items: center;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.simulation-section__header select {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  color: var(--color-text);
+  min-width: 240px;
+  padding: 10px 12px;
+}
+
+.simulation-grid {
+  min-width: 760px;
+  table-layout: fixed;
+  width: 100%;
+}
+
+.simulation-grid__col-category {
+  width: 42%;
+}
+
+.simulation-grid__col-average,
+.simulation-grid__col-value {
+  width: 24%;
+}
+
+.simulation-grid__col-action {
+  width: 72px;
+}
+
+.simulation-grid__category,
+.simulation-grid__empty {
+  text-align: center !important;
+}
+
+.simulation-grid__money {
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  text-align: center !important;
+  white-space: nowrap;
+}
+
+.simulation-grid__input {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  color: var(--color-text);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  padding: 9px 10px;
+  text-align: right;
+  width: 100%;
+}
+
+.simulation-grid__input:focus,
+.simulation-section__header select:focus {
+  border-color: var(--color-brand-blue);
+  box-shadow: 0 0 0 3px rgba(30, 150, 242, 0.12);
+  outline: none;
+}
+
+.simulation-grid__remove {
+  align-items: center;
+  background: rgba(229, 75, 63, 0.1);
+  border: 0;
+  border-radius: 999px;
+  color: var(--color-brand-red);
+  cursor: pointer;
+  display: inline-flex;
+  height: 30px;
+  justify-content: center;
+  width: 30px;
+}
+
+.simulation-grid__remove svg {
+  fill: none;
+  height: 16px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.5;
+  width: 16px;
+}
+
+.simulation-grid__remove:hover,
+.simulation-grid__remove:focus-visible {
+  background: rgba(229, 75, 63, 0.18);
+  outline: none;
+}
+
+.simulation-result {
+  align-items: center;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(150px, 1fr) auto minmax(150px, 1fr) auto minmax(150px, 1fr) auto minmax(170px, 1.1fr);
+  margin: 16px 0 32px;
+}
+
+.simulation-result__item {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 74px;
+  padding: 14px;
+}
+
+.simulation-result__item span {
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.simulation-result__item strong {
+  color: var(--color-text);
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+}
+
+.simulation-result__item--income strong,
+.simulation-result__item--positive strong {
+  color: var(--color-brand-green);
+}
+
+.simulation-result__item--expense strong,
+.simulation-result__item--negative strong {
+  color: var(--color-brand-red);
+}
+
+.simulation-result__item--investment strong {
+  color: var(--color-brand-indigo);
+}
+
+.simulation-result__operator {
+  color: var(--color-muted);
+  font-size: 22px;
+  font-weight: 900;
+  text-align: center;
+}
+
 .box-grid {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
@@ -684,4 +834,26 @@
 .cash-flow-row--expense td:last-child {
   color: var(--color-brand-red);
   font-weight: 700;
+}
+
+@media (max-width: 1180px) {
+  .simulation-result {
+    grid-template-columns: 1fr;
+  }
+
+  .simulation-result__operator {
+    display: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .simulation-section__header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .simulation-section__header select {
+    min-width: 0;
+    width: 100%;
+  }
 }

@@ -7,7 +7,7 @@
 .dashboard-summary {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(6, minmax(150px, 1fr));
+  grid-template-columns: repeat(5, minmax(150px, 1fr));
 }
 
 .dashboard-card {
@@ -43,11 +43,6 @@
 
 .dashboard-card--red {
   background: var(--color-brand-red);
-}
-
-.dashboard-card--yellow {
-  background: var(--color-brand-yellow);
-  color: var(--color-text);
 }
 
 .dashboard-insights {
@@ -448,7 +443,20 @@
   border-collapse: separate;
   border-spacing: 0;
   min-width: 1180px;
+  table-layout: fixed;
   width: 100%;
+}
+
+.category-summary__col-category {
+  width: 190px;
+}
+
+.category-summary__col-month {
+  width: 78px;
+}
+
+.category-summary__col-total {
+  width: 104px;
 }
 
 .category-summary__table th,
@@ -497,6 +505,40 @@
 .category-summary__table tfoot td {
   background: #f7fafc;
   border-bottom: 0;
+}
+
+.category-summary__table--indicators td {
+  font-weight: 800;
+}
+
+.category-summary__variation-chip {
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 900;
+  justify-content: center;
+  min-width: 62px;
+  padding: 5px 8px;
+}
+
+.category-summary__variation-chip--positive {
+  background: rgba(24, 166, 97, 0.12);
+  color: var(--color-brand-green);
+}
+
+.category-summary__variation-chip--negative {
+  background: rgba(229, 75, 63, 0.12);
+  color: var(--color-brand-red);
+}
+
+.indicator-threshold--good {
+  color: var(--color-brand-green);
+  font-weight: 900;
+}
+
+.indicator-threshold--bad {
+  color: var(--color-brand-red);
+  font-weight: 900;
 }
 
 .expense-ranking {

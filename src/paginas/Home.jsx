@@ -229,6 +229,102 @@ function somarResumoMensal(resumoCategorias) {
   )
 }
 
+function montarIndicadoresCategoriasAno(
+  totaisDespesas,
+  totaisReceitas,
+  totaisInvestimentos,
+  totaisAnoAnterior = null,
+) {
+  return mesesResumo.map((mes, index) => {
+    const despesas = Number(totaisDespesas.meses[index] || 0)
+    const receitas = Number(totaisReceitas.meses[index] || 0)
+    const investimentos = Number(totaisInvestimentos.meses[index] || 0)
+    const despesasMesAnterior =
+      index > 0
+        ? Number(totaisDespesas.meses[index - 1] || 0)
+        : Number(totaisAnoAnterior?.despesas?.meses?.[11] || 0)
+    const receitasMesAnterior =
+      index > 0
+        ? Number(totaisReceitas.meses[index - 1] || 0)
+        : Number(totaisAnoAnterior?.receitas?.meses?.[11] || 0)
+
+    return {
+      mes,
+      comprometimento: receitas > 0 ? (despesas / receitas) * 100 : null,
+      investimento: receitas > 0 ? (investimentos / receitas) * 100 : null,
+      variacaoDespesas:
+        despesasMesAnterior > 0
+          ? ((despesasMesAnterior - despesas) / despesasMesAnterior) * 100
+          : despesas > 0
+            ? -100
+            : 0,
+      variacaoDespesasValor: despesas - despesasMesAnterior,
+      variacaoReceitas:
+        receitasMesAnterior > 0
+          ? ((receitas - receitasMesAnterior) / receitasMesAnterior) * 100
+          : receitas > 0
+            ? 100
+            : 0,
+      variacaoReceitasValor: receitas - receitasMesAnterior,
+    }
+  })
+}
+
+function montarTotaisInvestimentosAno(lancamentos, contasInvestimentoIds, ano) {
+  const totais = {
+    meses: Array.from({ length: 12 }, () => 0),
+    total: 0,
+  }
+
+  lancamentos
+    .filter(
+      (lancamento) =>
+        lancamento.tipo_lancamento === 'Transferência' &&
+        Number(lancamento.ano_vencimento) === ano &&
+        contasInvestimentoIds.has(Number(lancamento.conta_destino_id)),
+    )
+    .forEach((lancamento) => {
+      const mes = Number(lancamento.mes_vencimento)
+
+      if (mes < 1 || mes > 12) {
+        return
+      }
+
+      const valor = Number(lancamento.valor || 0)
+      totais.meses[mes - 1] += valor
+      totais.total += valor
+    })
+
+  return totais
+}
+
+function formatarPercentualIndicador(valor, { comSinal = true } = {}) {
+  if (valor === null || Number.isNaN(Number(valor))) {
+    return '-'
+  }
+
+  const numero = Number(valor)
+  const sinal = comSinal && numero > 0 ? '+' : ''
+
+  return `${sinal}${numero.toFixed(1)}%`
+}
+
+function getClasseComprometimento(valor) {
+  if (valor === null || Number.isNaN(Number(valor))) {
+    return ''
+  }
+
+  return Number(valor) > 80 ? 'indicator-threshold--bad' : 'indicator-threshold--good'
+}
+
+function getClasseInvestimento(valor) {
+  if (valor === null || Number.isNaN(Number(valor))) {
+    return ''
+  }
+
+  return Number(valor) > 20 ? 'indicator-threshold--good' : 'indicator-threshold--bad'
+}
+
 function montarRankingDespesasMensal(categorias, lancamentos, parcelasCartao, ano, mes) {
   const categoriasPorId = new Map(categorias.map((categoria) => [Number(categoria.id), categoria]))
   const despesasDoMes = lancamentos.filter(
@@ -377,20 +473,6 @@ function calcularImpactoNaConta(conta, lancamento) {
   return 0
 }
 
-function calcularImpactoGlobal(lancamento) {
-  const valor = Number(lancamento.valor || 0)
-
-  if (lancamento.tipo_lancamento === 'Receita') {
-    return valor
-  }
-
-  if (lancamento.tipo_lancamento === 'Despesa') {
-    return -valor
-  }
-
-  return 0
-}
-
 function calcularTotalPorConta(conta, lancamentos, tipo) {
   return lancamentos.reduce((total, lancamento) => {
     if (lancamento.tipo_lancamento !== tipo) {
@@ -483,47 +565,6 @@ function montarPendenciasMes(lancamentos, ano, mes, contasInvestimentoIds) {
         aTransferir: 0,
       },
     )
-}
-
-function montarSaldoProjetadoDiario(lancamentos, saldoAtual, ano, mes, contasInvestimentoIds) {
-  const movimentosPendentes = lancamentos
-    .filter(
-      (lancamento) =>
-        !lancamento.data_pagamento &&
-        Number(lancamento.ano_vencimento) === ano &&
-        Number(lancamento.mes_vencimento) === mes &&
-        ['Receita', 'Despesa'].includes(lancamento.tipo_lancamento) &&
-        !isLancamentoEmContaInvestimento(lancamento, contasInvestimentoIds),
-    )
-    .map((lancamento) => ({
-      dia: Number(lancamento.dia_vencimento),
-      impacto: calcularImpactoGlobal(lancamento),
-      mes: Number(lancamento.mes_vencimento),
-      ano: Number(lancamento.ano_vencimento),
-    }))
-    .sort(compararPorData)
-
-  const pontos = []
-  let saldo = saldoAtual
-
-  movimentosPendentes.forEach((movimento) => {
-    saldo += movimento.impacto
-
-    const ultimo = pontos[pontos.length - 1]
-
-    if (ultimo?.dia === movimento.dia) {
-      ultimo.saldo = saldo
-      ultimo.impacto += movimento.impacto
-      return
-    }
-
-    pontos.push({
-      ...movimento,
-      saldo,
-    })
-  })
-
-  return pontos
 }
 
 function montarVariacaoCategorias(resumoCategorias, mes) {
@@ -987,6 +1028,14 @@ function Home() {
     () => montarResumoCategorias(categorias, lancamentos, anoSelecionado, 'Receita'),
     [anoSelecionado, categorias, lancamentos],
   )
+  const resumoDespesasAnoAnterior = useMemo(
+    () => montarResumoDespesasCategorias(categorias, lancamentos, parcelasCartao, anoSelecionado - 1),
+    [anoSelecionado, categorias, lancamentos, parcelasCartao],
+  )
+  const resumoReceitasAnoAnterior = useMemo(
+    () => montarResumoCategorias(categorias, lancamentos, anoSelecionado - 1, 'Receita'),
+    [anoSelecionado, categorias, lancamentos],
+  )
   const totaisDespesasPorCategoria = useMemo(
     () => somarResumoMensal(resumoDespesasPorCategoria),
     [resumoDespesasPorCategoria],
@@ -994,6 +1043,37 @@ function Home() {
   const totaisReceitasPorCategoria = useMemo(
     () => somarResumoMensal(resumoReceitasPorCategoria),
     [resumoReceitasPorCategoria],
+  )
+  const totaisDespesasAnoAnterior = useMemo(
+    () => somarResumoMensal(resumoDespesasAnoAnterior),
+    [resumoDespesasAnoAnterior],
+  )
+  const totaisReceitasAnoAnterior = useMemo(
+    () => somarResumoMensal(resumoReceitasAnoAnterior),
+    [resumoReceitasAnoAnterior],
+  )
+  const totaisInvestimentosAno = useMemo(
+    () => montarTotaisInvestimentosAno(lancamentos, contasInvestimentoIds, anoSelecionado),
+    [anoSelecionado, contasInvestimentoIds, lancamentos],
+  )
+  const indicadoresCategoriasAno = useMemo(
+    () =>
+      montarIndicadoresCategoriasAno(
+        totaisDespesasPorCategoria,
+        totaisReceitasPorCategoria,
+        totaisInvestimentosAno,
+        {
+          despesas: totaisDespesasAnoAnterior,
+          receitas: totaisReceitasAnoAnterior,
+        },
+      ),
+    [
+      totaisDespesasAnoAnterior,
+      totaisDespesasPorCategoria,
+      totaisInvestimentosAno,
+      totaisReceitasAnoAnterior,
+      totaisReceitasPorCategoria,
+    ],
   )
   const rankingDespesasMensal = useMemo(
     () => montarRankingDespesasMensal(
@@ -1076,9 +1156,6 @@ function Home() {
       ),
     [lancamentosCategoriaSelecionada],
   )
-  const totalDespesasMes = despesasFixasVariaveis.fixas + despesasFixasVariaveis.variaveis
-  const percentualComprometimento =
-    totalReceitas > 0 ? (totalDespesasMes / totalReceitas) * 100 : 0
   const percentualInvestido = totalReceitas > 0 ? (investimentos.mes / totalReceitas) * 100 : 0
   const saldoPendenteLiquido = pendenciasMes.aReceber - pendenciasMes.aPagar
 
@@ -1092,6 +1169,13 @@ function Home() {
 
         <div className="category-summary__table-wrap">
           <table className="category-summary__table">
+            <colgroup>
+              <col className="category-summary__col-category" />
+              {mesesResumo.map((mes) => (
+                <col className="category-summary__col-month" key={`col-${mes}`} />
+              ))}
+              <col className="category-summary__col-total" />
+            </colgroup>
             <thead>
               <tr>
                 <th>Categoria</th>
@@ -1131,6 +1215,155 @@ function Home() {
                 </tr>
               </tfoot>
             )}
+          </table>
+        </div>
+      </div>
+    )
+  }
+
+  function renderTabelaIndicadoresAno() {
+    const comprometimentoTotal =
+      totaisReceitasPorCategoria.total > 0
+        ? (totaisDespesasPorCategoria.total / totaisReceitasPorCategoria.total) * 100
+        : null
+    const investimentoTotal =
+      totaisReceitasPorCategoria.total > 0
+        ? (totaisInvestimentosAno.total / totaisReceitasPorCategoria.total) * 100
+        : null
+
+    return (
+      <div className="category-summary">
+        <div className="category-summary__header">
+          <h3>Indicadores</h3>
+          <span>{anoSelecionado}</span>
+        </div>
+
+        <div className="category-summary__table-wrap">
+          <table className="category-summary__table category-summary__table--indicators">
+            <colgroup>
+              <col className="category-summary__col-category" />
+              {mesesResumo.map((mes) => (
+                <col className="category-summary__col-month" key={`indicador-col-${mes}`} />
+              ))}
+              <col className="category-summary__col-total" />
+            </colgroup>
+            <thead>
+              <tr>
+                <th>Indicador</th>
+                {mesesResumo.map((mes) => (
+                  <th key={mes}>{mes}</th>
+                ))}
+                <th>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Comprometimento</td>
+                {indicadoresCategoriasAno.map((indicador) => (
+                  <td key={`comprometimento-${indicador.mes}`}>
+                    <span className={getClasseComprometimento(indicador.comprometimento)}>
+                      {formatarPercentualIndicador(indicador.comprometimento, { comSinal: false })}
+                    </span>
+                  </td>
+                ))}
+                <td>
+                  <span className={getClasseComprometimento(comprometimentoTotal)}>
+                    {formatarPercentualIndicador(comprometimentoTotal, { comSinal: false })}
+                  </span>
+                </td>
+              </tr>
+              <tr>
+                <td>Investimento</td>
+                {indicadoresCategoriasAno.map((indicador) => (
+                  <td key={`investimento-${indicador.mes}`}>
+                    <span className={getClasseInvestimento(indicador.investimento)}>
+                      {formatarPercentualIndicador(indicador.investimento, { comSinal: false })}
+                    </span>
+                  </td>
+                ))}
+                <td>
+                  <span className={getClasseInvestimento(investimentoTotal)}>
+                    {formatarPercentualIndicador(investimentoTotal, { comSinal: false })}
+                  </span>
+                </td>
+              </tr>
+              <tr>
+                <td>Variação despesas</td>
+                {indicadoresCategoriasAno.map((indicador) => (
+                  <td key={`variacao-${indicador.mes}`}>
+                    {indicador.variacaoDespesas === null ? (
+                      '-'
+                    ) : (
+                      <span
+                        className={`category-summary__variation-chip ${
+                          Number(indicador.variacaoDespesas) >= 0
+                            ? 'category-summary__variation-chip--positive'
+                            : 'category-summary__variation-chip--negative'
+                        }`}
+                      >
+                        {formatarPercentualIndicador(-indicador.variacaoDespesas)}
+                      </span>
+                    )}
+                  </td>
+                ))}
+                <td>-</td>
+              </tr>
+              <tr>
+                <td>Valor variação despesas</td>
+                {indicadoresCategoriasAno.map((indicador) => (
+                  <td key={`valor-variacao-despesas-${indicador.mes}`}>
+                    <span
+                      className={`category-summary__variation-chip ${
+                        Number(indicador.variacaoDespesas) >= 0
+                          ? 'category-summary__variation-chip--positive'
+                          : 'category-summary__variation-chip--negative'
+                      }`}
+                    >
+                      {formatarMoeda(indicador.variacaoDespesasValor)}
+                    </span>
+                  </td>
+                ))}
+                <td>-</td>
+              </tr>
+              <tr>
+                <td>Variação receitas</td>
+                {indicadoresCategoriasAno.map((indicador) => (
+                  <td key={`variacao-receitas-${indicador.mes}`}>
+                    {indicador.variacaoReceitas === null ? (
+                      '-'
+                    ) : (
+                      <span
+                        className={`category-summary__variation-chip ${
+                          Number(indicador.variacaoReceitas) >= 0
+                            ? 'category-summary__variation-chip--positive'
+                            : 'category-summary__variation-chip--negative'
+                        }`}
+                      >
+                        {formatarPercentualIndicador(indicador.variacaoReceitas)}
+                      </span>
+                    )}
+                  </td>
+                ))}
+                <td>-</td>
+              </tr>
+              <tr>
+                <td>Valor variação receitas</td>
+                {indicadoresCategoriasAno.map((indicador) => (
+                  <td key={`valor-variacao-receitas-${indicador.mes}`}>
+                    <span
+                      className={`category-summary__variation-chip ${
+                        Number(indicador.variacaoReceitas) >= 0
+                          ? 'category-summary__variation-chip--positive'
+                          : 'category-summary__variation-chip--negative'
+                      }`}
+                    >
+                      {formatarMoeda(indicador.variacaoReceitasValor)}
+                    </span>
+                  </td>
+                ))}
+                <td>-</td>
+              </tr>
+            </tbody>
           </table>
         </div>
       </div>
@@ -1183,13 +1416,6 @@ function Home() {
             >
               <span>Despesas</span>
               <strong>{formatarMoeda(totalDespesas)}</strong>
-            </article>
-            <article
-              className="dashboard-card dashboard-card--yellow"
-              title={`Comprometimento = despesas do mês (${formatarMoeda(totalDespesasMes)}) / receitas (${formatarMoeda(totalReceitas)}).`}
-            >
-              <span>Comprometimento</span>
-              <strong>{percentualComprometimento.toFixed(1)}%</strong>
             </article>
             <article
               className="dashboard-card dashboard-card--green"
@@ -1544,7 +1770,7 @@ function Home() {
             <div className="dashboard-section-header">
               <div>
                 <h2>Categorias no ano</h2>
-                <span>Valores somados por mês no ano filtrado.</span>
+                <span>Valores somados por mês; variações comparam com o mês anterior.</span>
               </div>
             </div>
 
@@ -1559,6 +1785,7 @@ function Home() {
                 resumoReceitasPorCategoria,
                 totaisReceitasPorCategoria,
               )}
+              {renderTabelaIndicadoresAno()}
             </div>
           </div>
 

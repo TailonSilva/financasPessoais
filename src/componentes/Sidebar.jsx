@@ -47,6 +47,20 @@ const links = [
     ),
   },
   {
+    to: '/simulacao',
+    label: 'Simulacao',
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 19h16" />
+        <path d="M6 17V9" />
+        <path d="M12 17V5" />
+        <path d="M18 17v-6" />
+        <path d="M4 5h4" />
+        <path d="M4 9h4" />
+      </svg>
+    ),
+  },
+  {
     to: '/configuracoes',
     label: 'Configurações',
     icon: (
